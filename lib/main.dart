@@ -17,13 +17,22 @@ import 'package:video_player/video_player.dart';
 const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const supabaseKey = String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
 
+/// A safe diagnostic that never includes the URL or key themselves.
+String? supabaseInitializationError;
+bool get supabaseBuildValuesPresent =>
+    supabaseUrl.trim().isNotEmpty && supabaseKey.trim().isNotEmpty;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (supabaseUrl.isNotEmpty && supabaseKey.isNotEmpty) {
+  if (supabaseBuildValuesPresent) {
     try {
-      await Supabase.initialize(url: supabaseUrl, publishableKey: supabaseKey);
-    } catch (_) {
-      // The UI remains available, but live backend operations will report unavailable.
+      await Supabase.initialize(
+        url: supabaseUrl.trim(),
+        publishableKey: supabaseKey.trim(),
+      );
+    } catch (error) {
+      // Keep the emergency UI available and expose a non-secret diagnostic.
+      supabaseInitializationError = error.runtimeType.toString();
     }
   }
   runApp(const ResqMitraApp());
@@ -425,8 +434,11 @@ class _AuthPageState extends State<AuthPage> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(create ? 'Enter your name, email and a password of at least 8 characters.' : 'Enter an email/phone and password of at least 8 characters.')));
       return;
     }
-    if (!SosRepository.instance.configured) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Supabase is not configured. Build with SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY.')));
+    if (!SosRepository.instance.configured || supabaseInitializationError != null) {
+      final message = !supabaseBuildValuesPresent
+          ? 'Supabase build configuration is missing. Check GitHub Actions variables SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY, then rebuild the APK.'
+          : 'Supabase initialization failed${supabaseInitializationError == null ? '' : ' (${supabaseInitializationError!})'}. Check the project URL and publishable key, then rebuild.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       return;
     }
     try {

@@ -11,13 +11,38 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-      # This project ZIP did not include the Android platform folder. Generate it
-      # on the runner before resolving packages/building the APK.
+      # Generate Android platform files if they are absent from the project.
       - run: flutter create --platforms=android --org in.resqmitra .
       - run: flutter pub get
       - run: dart format lib
       - run: flutter analyze
-      - run: flutter build apk --debug --dart-define=SUPABASE_URL="${{ vars.SUPABASE_URL }}" --dart-define=SUPABASE_PUBLISHABLE_KEY="${{ vars.SUPABASE_PUBLISHABLE_KEY }}"
+      # Fail early if GitHub repository variables are missing. Values are not printed.
+      - name: Validate Supabase build configuration
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ]; then
+            echo "ERROR: GitHub Actions variable SUPABASE_URL is missing or empty."
+            exit 1
+          fi
+          if [ -z "$SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "ERROR: GitHub Actions variable SUPABASE_PUBLISHABLE_KEY is missing or empty."
+            exit 1
+          fi
+          case "$SUPABASE_URL" in
+            https://*.supabase.co) ;;
+            *) echo "ERROR: SUPABASE_URL must be your HTTPS Supabase project URL."; exit 1 ;;
+          esac
+          echo "Supabase URL and publishable key are present."
+      - name: Build Android debug APK
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        run: >-
+          flutter build apk --debug
+          --dart-define=SUPABASE_URL="$SUPABASE_URL"
+          --dart-define=SUPABASE_PUBLISHABLE_KEY="$SUPABASE_PUBLISHABLE_KEY"
       - uses: actions/upload-artifact@v4
         with:
           name: resq-mitra-debug-apk

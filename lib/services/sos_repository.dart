@@ -8,8 +8,9 @@ class SosRepository {
   SosRepository._();
   static final SosRepository instance = SosRepository._();
 
-  bool get configured => const String.fromEnvironment('SUPABASE_URL').isNotEmpty &&
-      const String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY').isNotEmpty;
+  bool get configured =>
+      const String.fromEnvironment('SUPABASE_URL').trim().isNotEmpty &&
+      const String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY').trim().isNotEmpty;
   SupabaseClient get _client => Supabase.instance.client;
 
   Future<Map<String, dynamic>> createRequest({

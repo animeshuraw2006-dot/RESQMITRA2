@@ -59,3 +59,12 @@ flutter build apk --debug --dart-define=SUPABASE_URL=https://tgyitcorasmzwnjganm
 - After accepting an SOS, the responder can use the AUDIO action on that assignment to play the latest uploaded recording. If the recording is still uploading, try again shortly.
 - **This is recorded audio uploaded after capture, not a continuous live microphone stream.** Supabase Database/Storage is not a low-latency media transport. True live two-way/one-way audio requires WebRTC with a media/signalling service (for example, a properly secured LiveKit deployment) and additional call lifecycle, permission, consent, and disconnect handling. Do not describe this current recording feature as live streaming.
 - Test only with consenting test accounts/devices and sample incidents before any real deployment. Do not rely on the app as the only emergency channel; in India call **112** when immediate assistance is needed.
+
+## Supabase configuration for GitHub Actions Android builds
+
+In GitHub, open **Settings → Secrets and variables → Actions → Variables** and add these repository variables:
+
+- `SUPABASE_URL` — the HTTPS URL of your Supabase project (for this project: `https://tgyitcorasmzwnjganmj.supabase.co`).
+- `SUPABASE_PUBLISHABLE_KEY` — the project's publishable key from the Supabase API settings. Do not use a `service_role` or secret key in a mobile app.
+
+The `.github/workflows/flutter.yml` workflow validates that both variables are present before building. If either is missing, the workflow stops with a clear error rather than creating an APK with empty compile-time values. After changing variables, trigger a new workflow run and install the newly generated artifact; an already-installed APK will not change.
