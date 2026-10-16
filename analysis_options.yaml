@@ -1,0 +1,8 @@
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - web/**
+  errors:
+    curly_braces_in_flow_control_structures: ignore
+include: package:flutter_lints/flutter.yaml
