@@ -34,7 +34,7 @@ This update replaces Firebase Auth/Firestore client usage with Supabase Auth, a 
    supabase functions deploy accept-sos
    ```
 
-5. In **Database → Publications**, enable `responder_assignments` for `supabase_realtime`.
+5. The schema adds `responder_assignments` and `responder_locations` to `supabase_realtime` when the publication exists. If it does not, enable both in **Database → Publications** after the publication is created.
 6. Have an administrator verify responder identities and set `responder_profiles.verified = true` and `available = true` for test responder accounts. Ordinary sign-up only creates citizen profiles.
 
 ## Important limitations before real deployment
@@ -42,7 +42,20 @@ This update replaces Firebase Auth/Firestore client usage with Supabase Auth, a 
 - Dispatch currently assigns to all verified/available responders; it does **not** implement proximity ranking, FCM push delivery, or emergency-contact alerts. Realtime works while the responder app is connected; it is not a background push replacement.
 - The Edge Function endpoints and SQL are integration scaffolding and require testing in your actual Supabase project. The acceptance endpoint should receive a final concurrency/security review before production; test simultaneous accepts and enforce a single winning responder in a single database transaction.
 - No live emergency system can be guaranteed available. Test using dedicated test accounts/devices and keep India's official emergency number **112** accessible. Do not claim help has been contacted until a backend dispatch and responder acknowledgement are confirmed.
-- Private voice/video upload, FCM delivery, responder last-known location, audit logs, rate limits, expiry jobs, and retention policies are not included in this update.
+- OpenStreetMap tiles are integrated into the responder map. The Android application ID currently configured in Gradle is `com.example.resq_mitra`, and that exact value is used as the map package identifier. The map shows the responder GPS marker and the SOS coordinates from assigned requests.
+- Responder last-known locations are stored in `responder_locations` only while a verified, available responder shares location. RLS permits a help-seeker to read a responder location only when that responder is assigned to the help-seeker’s active emergency. The Home screen now has an **OPEN EMERGENCY MAP** entry; it shows the help-seeker GPS marker and only those responder locations permitted by RLS for the user’s active emergency. The responder map shows the responder GPS marker and assigned SOS coordinates.
+- Location sharing runs only while the responder map is open; Android background tracking is not enabled. The app stops its stream when the user taps Stop, but app termination can leave a last-known database row; clients must treat old `updated_at` values as stale.
+- Proximity-based responder ranking, FCM delivery, audit logs, rate limits, expiry jobs, and retention policies are not included in this update.
+
+
+## OpenStreetMap and location sharing
+
+- `pubspec.yaml` already includes `flutter_map`, `latlong2`, and `geolocator`; `flutter pub get` resolves them.
+- `android/app/src/main/AndroidManifest.xml` includes internet, coarse-location, and fine-location permissions. Location is requested at runtime.
+- The responder map uses `https://tile.openstreetmap.org/{z}/{x}/{y}.png` and displays `© OpenStreetMap contributors`. Follow https://operations.osmfoundation.org/policies/tiles/; the public tile service has no uptime guarantee and must not be used for bulk/offline tile downloads.
+- Run the updated `supabase/schema.sql` in Supabase SQL Editor to add the `responder_locations` table, RLS policies, and Realtime publication membership. Review this migration against any schema already applied in production before running it.
+- A responder must be authenticated and have `responder_profiles.verified = true` and `available = true` to publish a location. Help-seekers can read only locations for responders assigned to their active SOS.
+- This is foreground-only tracking. Do not assume it works when the app is minimized or terminated.
 
 ## Android build
 

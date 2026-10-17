@@ -62,6 +62,14 @@ create table if not exists public.responder_assignments (
   updated_at timestamptz not null default now(),
   unique(emergency_id, responder_id)
 );
+create table if not exists public.responder_locations (
+  responder_id uuid primary key references auth.users(id) on delete cascade,
+  latitude double precision not null check (latitude between -90 and 90),
+  longitude double precision not null check (longitude between -180 and 180),
+  accuracy_m double precision,
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.device_tokens (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -87,6 +95,7 @@ alter table public.responder_profiles enable row level security;
 alter table public.emergency_requests enable row level security;
 alter table public.responder_assignments enable row level security;
 alter table public.device_tokens enable row level security;
+alter table public.responder_locations enable row level security;
 
 drop policy if exists "profile read own" on public.profiles;
 create policy "profile read own" on public.profiles for select to authenticated using (id = (select auth.uid()));
@@ -109,11 +118,69 @@ create policy "user manage own device tokens" on public.device_tokens for all to
 
 create index if not exists emergency_requests_status_created_idx on public.emergency_requests(status, created_at desc);
 create index if not exists responder_assignments_responder_status_idx on public.responder_assignments(responder_id, status, created_at desc);
--- Enable responder_assignments in Dashboard > Database > Publications > supabase_realtime.
+
+-- Responders may publish only their own location while verified and available.
+drop policy if exists "verified available responder writes own location" on public.responder_locations;
+create policy "verified available responder writes own location"
+on public.responder_locations for insert to authenticated
+with check (
+  responder_id = (select auth.uid()) and exists (
+    select 1 from public.responder_profiles rp
+    where rp.user_id = (select auth.uid()) and rp.verified = true and rp.available = true
+  )
+);
+drop policy if exists "verified available responder updates own location" on public.responder_locations;
+create policy "verified available responder updates own location"
+on public.responder_locations for update to authenticated
+using (
+  responder_id = (select auth.uid()) and exists (
+    select 1 from public.responder_profiles rp
+    where rp.user_id = (select auth.uid()) and rp.verified = true and rp.available = true
+  )
+)
+with check (
+  responder_id = (select auth.uid()) and exists (
+    select 1 from public.responder_profiles rp
+    where rp.user_id = (select auth.uid()) and rp.verified = true and rp.available = true
+  )
+);
+drop policy if exists "responder deletes own location" on public.responder_locations;
+create policy "responder deletes own location"
+on public.responder_locations for delete to authenticated
+using (responder_id = (select auth.uid()));
+
+-- A user may read their own location. A help-seeker may read a responder's
+-- location only when that responder has an assignment for that help-seeker's
+-- still-active emergency. SECURITY DEFINER avoids policy recursion and returns
+-- only a boolean; it does not expose other emergency records.
+create or replace function public.can_view_responder_location(p_responder_id uuid)
+returns boolean
+language sql stable security definer set search_path = '' as $$
+  select p_responder_id = (select auth.uid())
+  or exists (
+    select 1
+    from public.responder_assignments a
+    join public.emergency_requests e on e.id = a.emergency_id
+    where a.responder_id = p_responder_id
+      and e.requester_id = (select auth.uid())
+      and e.status not in ('resolved', 'cancelled', 'expired')
+      and a.status in ('assigned', 'accepted', 'responding', 'arrived')
+  );
+$$;
+revoke all on function public.can_view_responder_location(uuid) from public;
+grant execute on function public.can_view_responder_location(uuid) to authenticated;
+drop policy if exists "read own or assigned responder location" on public.responder_locations;
+create policy "read own or assigned responder location"
+on public.responder_locations for select to authenticated
+using (public.can_view_responder_location(responder_id));
+
+create index if not exists responder_locations_updated_idx on public.responder_locations(updated_at desc);
+
+-- Enable responder_assignments and responder_locations in Dashboard > Database > Publications > supabase_realtime.
 
 -- Trusted transactional dispatch: writes the emergency and its eligible responder
--- assignments in one database transaction. Location-aware ranking can be added once
--- responder last-known locations and a reviewed dispatch radius are implemented.
+-- assignments in one database transaction. It currently assigns all verified/available
+-- responders; proximity-based ranking is not implemented yet.
 create or replace function public.dispatch_emergency(
   p_requester_id uuid, p_client_request_id text, p_category text,
   p_emergency_type text, p_priority text, p_instructions text,
@@ -165,6 +232,10 @@ grant execute on function public.claim_emergency(uuid,uuid) to service_role;
 
 do $$ begin
   alter publication supabase_realtime add table public.responder_assignments;
+exception when duplicate_object then null; when undefined_object then null; end $$;
+
+do $$ begin
+  alter publication supabase_realtime add table public.responder_locations;
 exception when duplicate_object then null; when undefined_object then null; end $$;
 
 -- Private emergency audio recordings (uploaded after recording; not a live audio stream).
