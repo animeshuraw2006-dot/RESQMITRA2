@@ -178,9 +178,8 @@ Future<String> notifyEmergencyContacts({required String sosType, required double
   if (!Platform.isAndroid) return 'Automatic SMS is available only in the Android app.';
   final contacts = await EmergencyContactsStore.load();
   if (contacts.isEmpty) return 'No emergency contacts saved; SOS SMS was not sent.';
-  var permission = await Permission.sms.status;
-  if (!permission.isGranted) permission = await Permission.sms.request();
-  if (!permission.isGranted) return 'SMS permission denied; emergency contacts were not texted.';
+  final permissionGranted = await _smsChannel.invokeMethod<bool>('ensureSmsPermission') ?? false;
+  if (!permissionGranted) return 'SMS permission denied; emergency contacts were not texted. Allow SMS permission in Android Settings and retry.';
   final message = formatSosSms(
     userName: currentSosUserName(),
     sosType: sosType,
@@ -345,7 +344,11 @@ class _SplashPageState extends State<SplashPage> {
     if (!mounted || _navigated) return;
     _navigated = true;
     _fallbackTimer?.cancel();
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthPage()));
+    final hasSession = supabaseBuildValuesPresent && supabaseInitializationError == null &&
+        Supabase.instance.client.auth.currentSession != null;
+    Navigator.pushReplacement(context, MaterialPageRoute(
+      builder: (_) => hasSession ? const HomePage() : const AuthPage(),
+    ));
   }
 
   @override
@@ -534,6 +537,15 @@ class EmergencyContact {
   );
 }
 
+String normalizeContactPhone(String input) {
+  final raw = input.trim();
+  final digits = raw.replaceAll(RegExp(r'\D'), '');
+  if (raw.startsWith('+')) return '+$digits';
+  if (digits.length == 10) return '+91$digits';
+  if (digits.length == 12 && digits.startsWith('91')) return '+$digits';
+  return raw;
+}
+
 class EmergencyContactsStore {
   static const _key = 'resq_mitra_emergency_contacts_v1';
   static Future<List<EmergencyContact>> load() async {
@@ -663,22 +675,32 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
   }
   Future<void> _save() async => EmergencyContactsStore.save(contacts);
 
+  Future<void> _callContact(String phone) async {
+    final uri = Uri(scheme: 'tel', path: phone);
+    try {
+      final launched = await launchUrl(uri);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to open the phone app on this device.')));
+      }
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to open the phone app on this device.')));
+    }
+  }
+
   Future<void> _addContact({int? editIndex}) async {
     final existing = editIndex == null ? null : contacts[editIndex];
     final name = TextEditingController(text: existing?.name ?? '');
     final relation = TextEditingController(text: existing?.relation ?? '');
     final phone = TextEditingController(text: existing?.phone ?? '');
     final formKey = GlobalKey<FormState>();
-    final result = await showModalBottomSheet<EmergencyContact>(
+    final result = await showDialog<EmergencyContact>(
       context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(22, 12, 22, 24),
-          decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+      barrierDismissible: true,
+      builder: (sheetContext) => Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(22, 18, 22, 24 + MediaQuery.of(sheetContext).viewInsets.bottom),
           child: Form(
             key: formKey,
             child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -698,15 +720,23 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
               const SizedBox(height: 14),
               TextFormField(controller: relation, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Relation', hintText: 'e.g. Mother, Friend, Spouse', prefixIcon: Icon(Icons.diversity_1_outlined), border: OutlineInputBorder()), validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter the relationship' : null),
               const SizedBox(height: 14),
-              TextFormField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Contact number', hintText: '+91 98765 43210', prefixIcon: Icon(Icons.phone_outlined), border: OutlineInputBorder()), validator: (v) {
-                final digits = (v ?? '').replaceAll(RegExp(r'[^0-9]'), '');
-                return digits.length < 7 || digits.length > 15 ? 'Enter a valid phone number' : null;
+              TextFormField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Contact number with country code', hintText: '+91 98765 43210', helperText: 'India: enter 10 digits or +91 followed by 10 digits', prefixIcon: Icon(Icons.phone_outlined), border: OutlineInputBorder()), validator: (v) {
+                final raw = (v ?? '').trim();
+                final digits = raw.replaceAll(RegExp(r'\D'), '');
+                if (raw.startsWith('+')) {
+                  if (digits.length < 8 || digits.length > 15 || digits.startsWith('0')) return 'Enter a valid country code and phone number (8–15 digits total)';
+                  return null;
+                }
+                if (digits.length == 10) return null;
+                if (digits.length == 12 && digits.startsWith('91')) return null;
+                return 'Enter 10 digits for India or an international number beginning with +country code';
               }),
               const SizedBox(height: 20),
               SizedBox(width: double.infinity, child: FilledButton.icon(
                 onPressed: () {
                   if (!(formKey.currentState?.validate() ?? false)) return;
-                  Navigator.pop(sheetContext, EmergencyContact(name: name.text.trim(), relation: relation.text.trim(), phone: phone.text.trim()));
+                  final normalizedPhone = normalizeContactPhone(phone.text);
+                  Navigator.pop(sheetContext, EmergencyContact(name: name.text.trim(), relation: relation.text.trim(), phone: normalizedPhone));
                 },
                 icon: const Icon(Icons.save_rounded),
                 label: Text(existing == null ? 'SAVE CONTACT' : 'UPDATE CONTACT'),
@@ -716,7 +746,12 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
         ),
       ),
     );
-    name.dispose(); relation.dispose(); phone.dispose();
+    // Wait until the dialog route has fully completed its transition before
+    // disposing controllers used by its TextFormFields.
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    name.dispose();
+    relation.dispose();
+    phone.dispose();
     if (result == null || !mounted) return;
     setState(() {
       if (editIndex == null) {
@@ -812,6 +847,7 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
                   const SizedBox(height: 5),
                   Text(c.phone, style: const TextStyle(color: Colors.black54, fontSize: 13)),
                 ])),
+                IconButton(tooltip: 'Call ${c.name}', icon: const Icon(Icons.call_rounded, color: Color(0xFF078442), size: 28), onPressed: () => _callContact(c.phone)),
                 PopupMenuButton<String>(tooltip: 'Contact options', onSelected: (value) {
                   if (value == 'edit') _addContact(editIndex: index);
                   if (value == 'delete') _deleteContact(index);

@@ -23,3 +23,11 @@ From the project folder:
 3. `flutter run` (Android device with SIM for SMS testing)
 
 Build tools were not available in the editing environment, so this modified source has not been compiled or live-tested here. Review build output on your machine before relying on it in an emergency.
+
+## October 2026 troubleshooting update
+- Emergency contact entry now uses a dialog route instead of a modal bottom sheet to avoid the reported Flutter inherited-widget deactivation assertion during route teardown.
+- The contact form validates local Indian 10-digit numbers (saved with `+91`) and explicit international numbers beginning with `+` (8–15 digits total).
+- Android SMS permission is requested specifically for `SEND_SMS` through the native method channel, instead of the broad permission-handler SMS group. SOS SMS is still sent through the Android device's SIM and carrier.
+- A call button remains next to every saved contact.
+
+Important: this archive has not been compiled with Flutter or tested on a physical phone in this environment. Test SMS only with consenting test contacts, an active SIM, SMS service and permission. Android accepting an SMS request does not prove delivery. Supabase session restoration is used to skip login when a valid session exists; users must sign in again if the session expires or the app has no valid Supabase session.
