@@ -56,7 +56,6 @@ This update replaces Firebase Auth/Firestore client usage with Supabase Auth, a 
 - Run the updated `supabase/schema.sql` in Supabase SQL Editor to add the `responder_locations` table, RLS policies, and Realtime publication membership. Review this migration against any schema already applied in production before running it.
 - A responder must be authenticated and have `responder_profiles.verified = true` and `available = true` to publish a location. Help-seekers can read only locations for responders assigned to their active SOS.
 - This is foreground-only tracking. Do not assume it works when the app is minimized or terminated.
-<<<<<<< HEAD
 
 
 ## Android push notification setup (OneSignal + FCM)
@@ -95,8 +94,6 @@ For a GitHub Actions build, provide `ONESIGNAL_APP_ID` as a repository variable 
 ### 5. Firebase SDK dependency note
 
 The Google Services Gradle plugin is configured at version `4.5.0` in the Android project and applied to the app module. This app does not add Firebase Analytics or the Firebase BoM because no Firebase client SDK product is used directly by the Flutter code; OneSignal handles its FCM integration. Add Firebase BoM/SDK dependencies only if you intentionally add a Firebase SDK that requires them.
-=======
->>>>>>> bdc116573e8efccc6b50484739f8284efb896777
 
 ## Android build
 

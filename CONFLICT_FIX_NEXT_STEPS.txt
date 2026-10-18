@@ -1,0 +1,16 @@
+RESQ-MITRA — conflict-marker fix and next steps
+
+The supplied project source has been checked for Git merge-conflict markers (<<<<<<<, =======, >>>>>>>); none remain in source files. The GPS location request retains bestForNavigation accuracy and a 25-second timeout.
+
+NEXT STEPS
+1. Extract this ZIP to a new folder (do not merge it into the old conflicted folder).
+2. In PowerShell, change directory to the extracted RESQ-MITRA project root.
+3. Run: flutter pub get
+4. Run: dart format lib
+5. Run: flutter analyze
+6. If both pass, build with your real Supabase URL, publishable key, and OneSignal App ID.
+7. If building via GitHub Actions, commit/push the clean files from this extracted project, or resolve the conflict in the repository's lib/main.dart and commit the resolution. Do not paste conflict-marker lines into Dart code.
+
+If `<<<<<<< HEAD`, `=======`, or `>>>>>>>` appears in a file, Git has left an unresolved merge conflict. Choose one valid code version, delete all three marker lines and the unwanted alternative, then format and analyze again.
+
+Validation note: archive integrity and conflict-marker scan only; Flutter/Dart commands were not run in this environment. Push delivery and physical-device behavior remain unverified.

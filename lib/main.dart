@@ -806,11 +806,7 @@ class _RequesterMapPageState extends State<RequesterMapPage> {
         throw Exception('Location permission was not granted.');
       }
       final position = await Geolocator.getCurrentPosition(
-<<<<<<< HEAD
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, timeLimit: Duration(seconds: 25)),
-=======
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
->>>>>>> bdc116573e8efccc6b50484739f8284efb896777
       );
       if (!mounted) return;
       final point = LatLng(position.latitude, position.longitude);
@@ -1882,14 +1878,10 @@ class _ResponderMapPageState extends State<ResponderMapPage> {
       if (user == null) throw Exception('Please sign in before sharing location.');
 
       final initial = await Geolocator.getCurrentPosition(
-<<<<<<< HEAD
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.bestForNavigation,
           timeLimit: Duration(seconds: 25),
         ),
-=======
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
->>>>>>> bdc116573e8efccc6b50484739f8284efb896777
       );
       await _publishLocation(user.id, initial);
       if (!mounted) return;
@@ -1902,13 +1894,8 @@ class _ResponderMapPageState extends State<ResponderMapPage> {
       _mapController.move(_currentLocation!, 16);
       _locationSubscription = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
-<<<<<<< HEAD
           accuracy: LocationAccuracy.bestForNavigation,
           distanceFilter: 5,
-=======
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 20,
->>>>>>> bdc116573e8efccc6b50484739f8284efb896777
         ),
       ).listen((position) async {
         if (!mounted) return;
