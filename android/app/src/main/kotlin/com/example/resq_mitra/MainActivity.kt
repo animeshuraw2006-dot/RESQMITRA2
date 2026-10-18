@@ -2,6 +2,10 @@ package com.example.resq_mitra
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.media.AudioAttributes
+import android.net.Uri
 import android.os.Build
 import android.telephony.SmsManager
 import io.flutter.embedding.android.FlutterActivity
@@ -9,6 +13,35 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    companion object {
+        const val SOS_NOTIFICATION_CHANNEL_ID = "resq_sos_alerts_v1"
+    }
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        createSosNotificationChannel()
+    }
+
+    private fun createSosNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val soundUri = Uri.parse("android.resource://$packageName/${com.example.resq_mitra.R.raw.high_alert_siren}")
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        val channel = NotificationChannel(
+            SOS_NOTIFICATION_CHANNEL_ID,
+            "RESQ-MITRA Emergency SOS",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Urgent alerts when a help-seeker confirms an SOS"
+            setSound(soundUri, audioAttributes)
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 500, 250, 500, 250, 900)
+            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+        }
+        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
     private val channelName = "resq_mitra/native_sms"
     private val smsPermissionRequestCode = 4127
     private var pendingPermissionResult: MethodChannel.Result? = null

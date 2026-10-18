@@ -93,8 +93,7 @@ class _MapScreenState extends State<MapScreen> {
         children: [
           TileLayer(
             urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            // Replace this with the Android applicationId from your project.
-            userAgentPackageName: 'com.example.resqmitra',
+            userAgentPackageName: 'com.example.resq_mitra',
           ),
           if (_locationLoaded)
             MarkerLayer(

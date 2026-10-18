@@ -8,14 +8,18 @@ import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:record/record.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'services/sos_repository.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
 const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const supabaseKey = String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
+const oneSignalAppId = String.fromEnvironment('ONESIGNAL_APP_ID');
 
 /// A safe diagnostic that never includes the URL or key themselves.
 String? supabaseInitializationError;
@@ -24,12 +28,29 @@ bool get supabaseBuildValuesPresent =>
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (oneSignalAppId.trim().isNotEmpty) {
+    OneSignal.initialize(oneSignalAppId.trim());
+    // Foreground pushes need explicit display + an in-app siren. Background
+    // Android pushes use the custom high-priority notification channel below.
+    OneSignal.Notifications.addForegroundWillDisplayListener((event) {
+      unawaited(_playIncomingSosSiren());
+      event.notification.display();
+    });
+    // Re-link a persisted Supabase session to OneSignal on app startup.
+    if (supabaseBuildValuesPresent) {
+      // Supabase is initialized below; session linking is repeated after initialization.
+    }
+  }
   if (supabaseBuildValuesPresent) {
     try {
       await Supabase.initialize(
         url: supabaseUrl.trim(),
         publishableKey: supabaseKey.trim(),
       );
+      final existingUser = Supabase.instance.client.auth.currentUser;
+      if (existingUser != null && oneSignalAppId.trim().isNotEmpty) {
+        OneSignal.login(existingUser.id);
+      }
     } catch (error) {
       // Keep the emergency UI available and expose a non-secret diagnostic.
       supabaseInitializationError = error.runtimeType.toString();
@@ -228,9 +249,15 @@ class AppState extends ChangeNotifier {
       if (enabled && permission != LocationPermission.denied &&
           permission != LocationPermission.deniedForever) {
         final pos = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.bestForNavigation,
+            timeLimit: Duration(seconds: 25),
+          ),
         );
-        lat = pos.latitude; lng = pos.longitude; accuracy = pos.accuracy;
+        // Do not silently pretend GPS is exact: store the measured accuracy too.
+        lat = pos.latitude;
+        lng = pos.longitude;
+        accuracy = pos.accuracy;
       }
     } catch (_) {}
 
@@ -265,12 +292,12 @@ class AppState extends ChangeNotifier {
       if (activeRequestId != null && draft.recordedAudio != null && draft.recordedAudio!.isNotEmpty) {
         try {
           await SosRepository.instance.uploadEmergencyAudio(activeRequestId!, draft.recordedAudio!);
-          databaseStatus = 'SOS and voice recording securely saved • ${result['status'] ?? 'pending'}. SMS: $databaseStatus';
+          databaseStatus = 'SOS saved • ${result['status'] ?? 'pending'} • Push: ${result['push_status'] ?? 'not reported'}. SMS: $databaseStatus';
         } catch (_) {
-          databaseStatus = 'SOS saved, but audio upload failed. SMS: $databaseStatus';
+          databaseStatus = 'SOS saved, but audio upload failed • Push: ${result['push_status'] ?? 'not reported'}. SMS: $databaseStatus';
         }
       } else {
-        databaseStatus = 'SOS recorded by Supabase • ${result['status'] ?? 'pending'}. SMS: $databaseStatus';
+        databaseStatus = 'SOS recorded • ${result['status'] ?? 'pending'} • Push: ${result['push_status'] ?? 'not reported'} (${result['onesignal_recipients'] ?? 0} recipients). SMS: $databaseStatus';
       }
       demoRequests.insert(0, {'type': draft.category, 'emergency': draft.emergency, 'status': 'Pending', 'urgency': highAlert ? 'HIGH ALERT' : 'normal'});
     } on AuthException {
@@ -301,6 +328,16 @@ final appState = AppState();
 final highAlertSirenPlayer = AudioPlayer();
 final emergencyAudioPlayer = AudioPlayer();
 final Set<String> alertedHighAlertIds = <String>{};
+
+Future<void> _playIncomingSosSiren() async {
+  try {
+    await highAlertSirenPlayer.stop();
+    await highAlertSirenPlayer.setReleaseMode(ReleaseMode.stop);
+    await highAlertSirenPlayer.play(AssetSource('high_alert_siren.ogg'));
+  } catch (_) {
+    // Android's notification-channel sound remains the background fallback.
+  }
+}
 
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
@@ -457,6 +494,10 @@ class _AuthPageState extends State<AuthPage> {
       }
       if (!mounted) return;
       appState.signedIn = Supabase.instance.client.auth.currentSession != null;
+      final signedInUser = Supabase.instance.client.auth.currentUser;
+      if (signedInUser != null && oneSignalAppId.trim().isNotEmpty) {
+        OneSignal.login(signedInUser.id);
+      }
       Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const PermissionsPage()));
     } on AuthException catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -503,6 +544,9 @@ class _PermissionsPageState extends State<PermissionsPage> {
       default: return;
     }
     final status = await p.request();
+    if (key == 'Notifications' && status.isGranted && oneSignalAppId.trim().isNotEmpty) {
+      try { await OneSignal.Notifications.requestPermission(true); } catch (_) {}
+    }
     if (key == 'Location' && status.isGranted) {
       try { await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium)); } catch (_) {}
     }
@@ -600,6 +644,40 @@ class HomePage extends StatefulWidget {
   @override State<HomePage> createState() => _HomePageState();
 }
 class _HomePageState extends State<HomePage> {
+  bool _sirenActive = false;
+  int _sirenColorIndex = 0;
+  Timer? _sirenBlinkTimer;
+  final AudioPlayer _manualSirenPlayer = AudioPlayer();
+  static const List<Color> _sirenColors = [Colors.red, Colors.blue, Colors.white];
+
+  Future<void> _startManualSiren() async {
+    if (_sirenActive) return;
+    setState(() { _sirenActive = true; _sirenColorIndex = 0; });
+    _sirenBlinkTimer = Timer.periodic(const Duration(milliseconds: 350), (_) {
+      if (mounted && _sirenActive) setState(() => _sirenColorIndex = (_sirenColorIndex + 1) % _sirenColors.length);
+    });
+    try {
+      await _manualSirenPlayer.setReleaseMode(ReleaseMode.loop);
+      await _manualSirenPlayer.play(AssetSource('high_alert_siren.ogg'));
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not play the siren audio. Check the app assets and device volume.')));
+    }
+  }
+
+  Future<void> _stopManualSiren() async {
+    _sirenBlinkTimer?.cancel();
+    _sirenBlinkTimer = null;
+    try { await _manualSirenPlayer.stop(); } catch (_) {}
+    if (mounted) setState(() => _sirenActive = false);
+  }
+
+  @override
+  void dispose() {
+    _sirenBlinkTimer?.cancel();
+    _manualSirenPlayer.dispose();
+    super.dispose();
+  }
+
   final helplines = const [
     ['Pan-India Emergency', '112', Icons.emergency],
     ['Police', '100', Icons.local_police],
@@ -615,7 +693,9 @@ class _HomePageState extends State<HomePage> {
       if (mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open dialer for $number'))); }
     }
   }
-  @override Widget build(BuildContext context) => AnimatedBuilder(animation: appState, builder: (context, _) => Scaffold(
+  @override Widget build(BuildContext context) => AnimatedBuilder(animation: appState, builder: (context, _) => Stack(
+    children: [
+      Scaffold(
     appBar: AppBar(title: const Text('RESQ-MITRA'), actions: [IconButton(tooltip: 'Responder mode', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ResponderPage())), icon: const Icon(Icons.volunteer_activism))]),
     body: ListView(padding: const EdgeInsets.all(18), children: [
       Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), gradient: const LinearGradient(colors: [Color(0xFFFFF0E2), Color(0xFFE8F8EE)])), child: Column(children: [
@@ -627,6 +707,21 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 16), const Text('Choose an emergency type for standard SOS. High Alert sends an immediate-danger request after its 5-second countdown.', textAlign: TextAlign.center, style: TextStyle(color: navy)),
       ])),
       const SizedBox(height: 16),
+      SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: yellow,
+            foregroundColor: const Color(0xFF342600),
+            padding: const EdgeInsets.symmetric(vertical: 17, horizontal: 18),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          ),
+          onPressed: _startManualSiren,
+          icon: const Icon(Icons.campaign_rounded, size: 32),
+          label: const Text('SIREN', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: 1.2)),
+        ),
+      ),
+      const SizedBox(height: 10),
       InkWell(
         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EmergencyContactsPage())),
         borderRadius: BorderRadius.circular(22),
@@ -649,13 +744,143 @@ class _HomePageState extends State<HomePage> {
           ]),
         ),
       ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RequesterMapPage())),
+        icon: const Icon(Icons.map_outlined),
+        label: const Text('OPEN EMERGENCY MAP'),
+      ),
+      const SizedBox(height: 14),
       const SizedBox(height: 22), const Text('EMERGENCY HELPLINES', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17, color: navy)),
       const SizedBox(height: 8),
       ...helplines.map((h) => Card(child: ListTile(leading: CircleAvatar(backgroundColor: const Color(0xFFE1F5E8), child: Icon(h[2] as IconData, color: green)), title: Text(h[0] as String, style: const TextStyle(fontWeight: FontWeight.bold)), subtitle: Text(h[1] as String), trailing: IconButton(icon: const Icon(Icons.call, color: green), onPressed: () => call(h[1] as String))))),
       const SizedBox(height: 8), OutlinedButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ResponderPage())), icon: const Icon(Icons.volunteer_activism), label: const Text('Switch to AS RESPONDER')),
       const SizedBox(height: 8), const Text('Emergency numbers can vary by location. Verify local numbers before relying on them.', style: TextStyle(fontSize: 12, color: Colors.black54)),
     ]),
+      ),
+      if (_sirenActive)
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _stopManualSiren,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 90),
+              color: _sirenColors[_sirenColorIndex],
+              child: SafeArea(child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.campaign_rounded, size: 100, color: _sirenColorIndex == 2 ? Colors.red : Colors.white),
+                const SizedBox(height: 20),
+                Text('SIREN ACTIVE', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: _sirenColorIndex == 2 ? Colors.black : Colors.white)),
+                const SizedBox(height: 12),
+                Text('TAP ANYWHERE TO TURN OFF', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: _sirenColorIndex == 2 ? Colors.black : Colors.white)),
+              ]))),
+            ),
+          ),
+        ),
+    ],
   ));
+}
+
+
+class RequesterMapPage extends StatefulWidget {
+  const RequesterMapPage({super.key});
+  @override
+  State<RequesterMapPage> createState() => _RequesterMapPageState();
+}
+
+class _RequesterMapPageState extends State<RequesterMapPage> {
+  final MapController _mapController = MapController();
+  LatLng? _currentLocation;
+  bool _loading = false;
+  String _status = 'Tap My Location to find your current position.';
+
+  Future<void> _locate() async {
+    if (_loading) return;
+    setState(() => _loading = true);
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        throw Exception('Enable GPS/location services and try again.');
+      }
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        throw Exception('Location permission was not granted.');
+      }
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, timeLimit: Duration(seconds: 25)),
+      );
+      if (!mounted) return;
+      final point = LatLng(position.latitude, position.longitude);
+      setState(() {
+        _currentLocation = point;
+        _status = 'Your GPS location is shown. Responder markers appear only for authorized assignments.';
+      });
+      _mapController.move(point, 15);
+    } catch (error) {
+      if (mounted) setState(() => _status = error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = Supabase.instance.client.auth.currentUser;
+    final responderLocations = user == null
+        ? const Stream<List<Map<String, dynamic>>>.empty()
+        : Supabase.instance.client.from('responder_locations').stream(primaryKey: ['responder_id']);
+    return Scaffold(
+      appBar: AppBar(title: const Text('RESQ-MITRA • Emergency Map')),
+      body: Column(children: [
+        Expanded(child: FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(initialCenter: _currentLocation ?? const LatLng(20.5937, 78.9629), initialZoom: _currentLocation == null ? 4.5 : 15),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.example.resq_mitra',
+            ),
+            StreamBuilder<List<Map<String, dynamic>>>(
+              stream: responderLocations,
+              builder: (context, snapshot) {
+                final markers = <Marker>[];
+                final rows = snapshot.data ?? const <Map<String, dynamic>>[];
+                final now = DateTime.now().toUtc();
+                for (final row in rows) {
+                  final lat = row['latitude'];
+                  final lng = row['longitude'];
+                  final updatedRaw = row['updated_at'];
+                  final updated = updatedRaw is String ? DateTime.tryParse(updatedRaw)?.toUtc() : null;
+                  if (lat is! num || lng is! num || updated == null || now.difference(updated).inMinutes > 5) continue;
+                  markers.add(Marker(
+                    point: LatLng(lat.toDouble(), lng.toDouble()), width: 48, height: 54,
+                    child: const Tooltip(message: 'Assigned responder', child: Icon(Icons.health_and_safety, color: green, size: 40)),
+                  ));
+                }
+                if (_currentLocation != null) {
+                  markers.add(Marker(
+                    point: _currentLocation!, width: 54, height: 58,
+                    child: const Tooltip(message: 'Your current location', child: Icon(Icons.person_pin_circle, color: blue, size: 48)),
+                  ));
+                }
+                return MarkerLayer(markers: markers);
+              },
+            ),
+            RichAttributionWidget(attributions: [TextSourceAttribution('© OpenStreetMap contributors')]),
+          ],
+        )),
+        SafeArea(top: false, child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text(_status),
+            const SizedBox(height: 8),
+            FilledButton.icon(onPressed: _loading ? null : _locate, icon: const Icon(Icons.my_location), label: Text(_loading ? 'Locating…' : 'MY LOCATION')),
+            const SizedBox(height: 6),
+            const Text('Responder locations are visible only when database policies authorize them for your active emergency. Old locations (over 5 minutes) are hidden.', style: TextStyle(fontSize: 12, color: Colors.black54)),
+          ]),
+        )),
+      ]),
+    );
+  }
 }
 
 
@@ -1105,6 +1330,150 @@ class _ConfirmSosPageState extends State<ConfirmSosPage> {
   }
 }
 
+class ActiveSosLiveMap extends StatefulWidget {
+  const ActiveSosLiveMap({super.key, required this.emergencyId});
+  final String emergencyId;
+
+  @override
+  State<ActiveSosLiveMap> createState() => _ActiveSosLiveMapState();
+}
+
+class _ActiveSosLiveMapState extends State<ActiveSosLiveMap> {
+  final MapController _controller = MapController();
+  late Future<Map<String, dynamic>?> _emergencyFuture;
+  late final Stream<List<Map<String, dynamic>>> _responderLocations;
+  bool _centeredOnSos = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final client = Supabase.instance.client;
+    _emergencyFuture = client.from('emergency_requests')
+        .select('id, requester_id, latitude, longitude, accuracy_meters, status, updated_at')
+        .eq('id', widget.emergencyId)
+        .maybeSingle();
+    // RLS must limit this stream to responders assigned to this user's active SOS.
+    _responderLocations = client.from('responder_locations')
+        .stream(primaryKey: ['responder_id']);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 310,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: FutureBuilder<Map<String, dynamic>?>(
+          future: _emergencyFuture,
+          builder: (context, emergencySnapshot) {
+            final emergency = emergencySnapshot.data;
+            final lat = emergency?['latitude'];
+            final lng = emergency?['longitude'];
+            final userPoint = lat is num && lng is num
+                ? LatLng(lat.toDouble(), lng.toDouble())
+                : null;
+            if (userPoint != null && !_centeredOnSos) {
+              _centeredOnSos = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _controller.move(userPoint, 16);
+              });
+            }
+            return Column(children: [
+              Expanded(
+                child: FlutterMap(
+                  mapController: _controller,
+                  options: MapOptions(
+                    initialCenter: userPoint ?? const LatLng(20.5937, 78.9629),
+                    initialZoom: userPoint == null ? 4.5 : 15,
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.example.resq_mitra',
+                    ),
+                    StreamBuilder<List<Map<String, dynamic>>>(
+                      stream: _responderLocations,
+                      builder: (context, snapshot) {
+                        final markers = <Marker>[];
+                        if (userPoint != null) {
+                          markers.add(Marker(
+                            point: userPoint,
+                            width: 52,
+                            height: 58,
+                            child: const Tooltip(
+                              message: 'Help-seeker SOS location',
+                              child: Icon(Icons.person_pin_circle, color: red, size: 48),
+                            ),
+                          ));
+                        }
+                        final now = DateTime.now().toUtc();
+                        for (final row in snapshot.data ?? const <Map<String, dynamic>>[]) {
+                          final rlat = row['latitude'];
+                          final rlng = row['longitude'];
+                          final updatedRaw = row['updated_at'];
+                          final updated = updatedRaw is String ? DateTime.tryParse(updatedRaw)?.toUtc() : null;
+                          if (rlat is! num || rlng is! num || updated == null ||
+                              now.difference(updated).inMinutes >= 5) continue;
+                          markers.add(Marker(
+                            point: LatLng(rlat.toDouble(), rlng.toDouble()),
+                            width: 48,
+                            height: 54,
+                            child: const Tooltip(
+                              message: 'Authorized responder location',
+                              child: Icon(Icons.health_and_safety, color: green, size: 40),
+                            ),
+                          ));
+                        }
+                        return MarkerLayer(markers: markers);
+                      },
+                    ),
+                    RichAttributionWidget(
+                      attributions: [TextSourceAttribution('© OpenStreetMap contributors')],
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                width: double.infinity,
+                color: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                child: Row(children: [
+                  const Icon(Icons.person_pin_circle, color: red, size: 20),
+                  const Expanded(child: Text('Your SOS location', style: TextStyle(fontSize: 12))),
+                  const Icon(Icons.health_and_safety, color: green, size: 20),
+                  const Expanded(child: Text('Responders', style: TextStyle(fontSize: 12))),
+                  IconButton(
+                    tooltip: 'Refresh SOS location',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => setState(() {
+                      _emergencyFuture = Supabase.instance.client.from('emergency_requests')
+                          .select('id, requester_id, latitude, longitude, accuracy_meters, status, updated_at')
+                          .eq('id', widget.emergencyId).maybeSingle();
+                    }),
+                    icon: const Icon(Icons.refresh),
+                  ),
+                ]),
+              ),
+              if (emergencySnapshot.hasError)
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Text('Could not load SOS location. Check your connection and Supabase access policies.',
+                      style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12)),
+                ),
+              if (userPoint != null && emergency?['accuracy_meters'] is num)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text('Reported GPS accuracy: approximately ${(emergency!['accuracy_meters'] as num).round()} m',
+                      style: const TextStyle(fontSize: 11, color: Colors.black54)),
+                ),
+            ]);
+          },
+        ),
+      ),
+    );
+  }
+}
+
 class ActiveSosPage extends StatelessWidget {
   const ActiveSosPage({super.key});
   @override Widget build(BuildContext context) => AnimatedBuilder(animation: appState, builder: (context, _) {
@@ -1117,9 +1486,18 @@ class ActiveSosPage extends StatelessWidget {
         const SizedBox(height: 6), const Text('This page shows the status returned by the configured backend. Background alerts require a push-notification service. If you need immediate help, call 112.', textAlign: TextAlign.center),
       ])),
       const SizedBox(height: 16),
-      Container(height: 245, decoration: BoxDecoration(color: const Color(0xFFDDEFE7), borderRadius: BorderRadius.circular(18)), child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Icon(Icons.map_outlined, size: 66, color: green), Text('MAP PREVIEW', style: TextStyle(fontWeight: FontWeight.w900, color: navy)), SizedBox(height: 6), Text('Live map and responder positions require map API + backend', textAlign: TextAlign.center, style: TextStyle(fontSize: 12)),
-      ])),
+      if (appState.activeRequestId != null)
+        ActiveSosLiveMap(emergencyId: appState.activeRequestId!)
+      else
+        Container(
+          height: 245,
+          decoration: BoxDecoration(color: const Color(0xFFFFF2D7), borderRadius: BorderRadius.circular(18)),
+          padding: const EdgeInsets.all(16),
+          child: const Center(child: Text(
+            'The SOS has no confirmed server location yet. Check your GPS permission and network, then retry SOS if needed.',
+            textAlign: TextAlign.center,
+          )),
+        ),
       const SizedBox(height: 12),
       if (d != null && d.doNotCall) const ListTile(leading: Icon(Icons.do_not_disturb_on, color: pink), title: Text('DO NOT CALL enabled'), subtitle: Text('Preference retained in this local demo.')),
       if (d != null && d.notes.isNotEmpty) ListTile(leading: const Icon(Icons.notes), title: const Text('Your instructions'), subtitle: Text(d.notes)),
@@ -1457,27 +1835,239 @@ class _ResponderPageState extends State<ResponderPage> {
 
 class ResponderMapPage extends StatefulWidget {
   const ResponderMapPage({super.key});
-  @override State<ResponderMapPage> createState() => _ResponderMapPageState();
+  @override
+  State<ResponderMapPage> createState() => _ResponderMapPageState();
 }
+
 class _ResponderMapPageState extends State<ResponderMapPage> {
-  String status = 'Location not checked';
-  Future<void> locate() async {
-    final permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-      final requested = await Geolocator.requestPermission();
-      if (requested == LocationPermission.denied || requested == LocationPermission.deniedForever) {
-        setState(() => status = 'Location permission not granted'); return;
+  final MapController _mapController = MapController();
+  StreamSubscription<Position>? _locationSubscription;
+  LatLng? _currentLocation;
+  double? _accuracy;
+  bool _loading = false;
+  bool _sharing = false;
+  String _status = 'Location sharing is off';
+  String? _locationError;
+
+  @override
+  void dispose() {
+    _locationSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _startLocationSharing() async {
+    if (_loading || _sharing) return;
+    setState(() {
+      _loading = true;
+      _locationError = null;
+      _status = 'Checking location permission…';
+    });
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        throw Exception('Enable GPS/location services and try again.');
+      }
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        throw Exception('Location permission was not granted. Enable it in Settings.');
+      }
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) throw Exception('Please sign in before sharing location.');
+
+      final initial = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+          timeLimit: Duration(seconds: 25),
+        ),
+      );
+      await _publishLocation(user.id, initial);
+      if (!mounted) return;
+      setState(() {
+        _currentLocation = LatLng(initial.latitude, initial.longitude);
+        _accuracy = initial.accuracy;
+        _sharing = true;
+        _status = 'Sharing location while this screen is active';
+      });
+      _mapController.move(_currentLocation!, 16);
+      _locationSubscription = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+          distanceFilter: 5,
+        ),
+      ).listen((position) async {
+        if (!mounted) return;
+        final user = Supabase.instance.client.auth.currentUser;
+        if (user == null) {
+          await _stopLocationSharing(showMessage: false);
+          return;
+        }
+        try {
+          await _publishLocation(user.id, position);
+          if (!mounted) return;
+          setState(() {
+            _currentLocation = LatLng(position.latitude, position.longitude);
+            _accuracy = position.accuracy;
+            _status = 'Location updated • ${DateTime.now().toLocal().toString().substring(11, 19)}';
+          });
+        } catch (error) {
+          if (!mounted) return;
+          setState(() => _locationError = 'Location update failed. Check network and responder verification.');
+        }
+      }, onError: (Object error) {
+        if (mounted) setState(() => _locationError = 'GPS updates stopped. Check location permission.');
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _status = 'Location sharing could not start';
+          _locationError = error.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _publishLocation(String userId, Position position) async {
+    await Supabase.instance.client.from('responder_locations').upsert({
+      'responder_id': userId,
+      'latitude': position.latitude,
+      'longitude': position.longitude,
+      'accuracy_m': position.accuracy,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    });
+  }
+
+  Future<void> _stopLocationSharing({bool showMessage = true}) async {
+    await _locationSubscription?.cancel();
+    _locationSubscription = null;
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user != null) {
+      try {
+        await Supabase.instance.client.from('responder_locations').delete().eq('responder_id', user.id);
+      } catch (_) {
+        // RLS/network can prevent deletion; updated_at lets clients treat the row as stale.
       }
     }
-    try {
-      final p = await Geolocator.getCurrentPosition();
-      setState(() => status = 'Current coordinates: ${p.latitude.toStringAsFixed(5)}, ${p.longitude.toStringAsFixed(5)}');
-    } catch (_) { setState(() => status = 'Could not determine current location'); }
+    if (mounted) {
+      setState(() {
+        _sharing = false;
+        _status = 'Location sharing is off';
+      });
+      if (showMessage) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Responder location sharing stopped.')),
+        );
+      }
+    }
   }
-  @override Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('Responder map')), body: Padding(padding: const EdgeInsets.all(18), child: Column(children: [
-    Expanded(child: Container(width: double.infinity, decoration: BoxDecoration(color: const Color(0xFFDDEFE7), borderRadius: BorderRadius.circular(20)), child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Icon(Icons.map, size: 70, color: green), SizedBox(height: 10), Text('MAP PLACEHOLDER', style: TextStyle(fontWeight: FontWeight.w900, color: navy)), Padding(padding: EdgeInsets.all(18), child: Text('Connect Google Maps or OpenStreetMap tiles and a verified help-centre dataset to display real markers.', textAlign: TextAlign.center)),
-    ]))),
-    const SizedBox(height: 14), Text(status, textAlign: TextAlign.center), const SizedBox(height: 8), FilledButton.icon(onPressed: locate, icon: const Icon(Icons.my_location), label: const Text('GET MY LOCATION')),
-  ])));
+
+  List<Marker> _buildEmergencyMarkers(List<Map<String, dynamic>> rows) {
+    final markers = <Marker>[];
+    for (final row in rows) {
+      final lat = row['latitude'];
+      final lng = row['longitude'];
+      if (lat is! num || lng is! num) continue;
+      markers.add(Marker(
+        point: LatLng(lat.toDouble(), lng.toDouble()),
+        width: 52,
+        height: 58,
+        child: const Tooltip(
+          message: 'Assigned emergency location',
+          child: Icon(Icons.sos, color: red, size: 42),
+        ),
+      ));
+    }
+    return markers;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = Supabase.instance.client.auth.currentUser;
+    final assignments = user == null
+        ? const Stream<List<Map<String, dynamic>>>.empty()
+        : SosRepository.instance.watchActiveRequests();
+    final markers = <Marker>[];
+    if (_currentLocation != null) {
+      markers.add(Marker(
+        point: _currentLocation!,
+        width: 54,
+        height: 58,
+        child: const Tooltip(
+          message: 'Your current location',
+          child: Icon(Icons.person_pin_circle, color: blue, size: 48),
+        ),
+      ));
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('RESQ-MITRA • Responder Map')),
+      body: Column(children: [
+        Expanded(
+          child: FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: _currentLocation ?? const LatLng(20.5937, 78.9629),
+              initialZoom: _currentLocation == null ? 4.5 : 15,
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.example.resq_mitra',
+              ),
+              if (markers.isNotEmpty) MarkerLayer(markers: markers),
+              StreamBuilder<List<Map<String, dynamic>>>(
+                stream: assignments,
+                builder: (context, snapshot) {
+                  final emergencyMarkers = _buildEmergencyMarkers(snapshot.data ?? const []);
+                  if (emergencyMarkers.isEmpty) return const SizedBox.shrink();
+                  return MarkerLayer(markers: emergencyMarkers);
+                },
+              ),
+              RichAttributionWidget(
+                attributions: [
+                  TextSourceAttribution('© OpenStreetMap contributors'),
+                ],
+              ),
+            ],
+          ),
+        ),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text(_status, style: const TextStyle(fontWeight: FontWeight.w700)),
+              if (_accuracy != null) Text('GPS accuracy: approximately ${_accuracy!.round()} m'),
+              if (_locationError != null) ...[
+                const SizedBox(height: 6),
+                Text(_locationError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              ],
+              const SizedBox(height: 10),
+              if (!_sharing)
+                FilledButton.icon(
+                  onPressed: _loading ? null : _startLocationSharing,
+                  icon: const Icon(Icons.my_location),
+                  label: Text(_loading ? 'Starting…' : 'START LOCATION SHARING'),
+                )
+              else
+                OutlinedButton.icon(
+                  onPressed: _stopLocationSharing,
+                  icon: const Icon(Icons.location_off),
+                  label: const Text('STOP LOCATION SHARING'),
+                ),
+              const SizedBox(height: 6),
+              const Text(
+                'Blue marker: your location. Red SOS markers: assigned emergency locations. Sharing runs only while this screen is active; background tracking is not enabled.',
+                style: TextStyle(fontSize: 12, color: Colors.black54),
+              ),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
 }

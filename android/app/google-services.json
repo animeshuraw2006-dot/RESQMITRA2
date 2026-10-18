@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "3583127384",
+    "project_id": "resq-mitra-push",
+    "storage_bucket": "resq-mitra-push.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:3583127384:android:0eaf38b8f85b8a2e10bf2d",
+        "android_client_info": {
+          "package_name": "com.example.resq_mitra"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBuAe1iadeEjhu5Cniwv0KnlruOJdMrwa8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
