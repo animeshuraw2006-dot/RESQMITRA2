@@ -91,21 +91,31 @@ class MainActivity : FlutterActivity() {
             return
         }
         try {
+            // On Android 12+ prefer the system service, but fall back to the
+            // legacy default-subscription manager if the service is unavailable.
             val manager: SmsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                getSystemService(SmsManager::class.java)
+                getSystemService(SmsManager::class.java) ?: run {
+                    @Suppress("DEPRECATION")
+                    SmsManager.getDefault()
+                }
             } else {
                 @Suppress("DEPRECATION")
                 SmsManager.getDefault()
             }
+            val normalizedPhone = phone.trim().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+            if (!normalizedPhone.matches(Regex("^\\+?[0-9]{7,15}$"))) {
+                result.error("invalid_phone", "The emergency contact number is not a valid 7–15 digit phone number.", null)
+                return
+            }
             val parts = manager.divideMessage(message)
             if (parts.size > 1) {
-                manager.sendMultipartTextMessage(phone, null, parts, null, null)
+                manager.sendMultipartTextMessage(normalizedPhone, null, parts, null, null)
             } else {
-                manager.sendTextMessage(phone, null, message, null, null)
+                manager.sendTextMessage(normalizedPhone, null, message, null, null)
             }
             result.success("submitted")
         } catch (e: Exception) {
-            result.error("sms_send_failed", e.message ?: "Android could not submit the SMS.", null)
+            result.error("sms_send_failed", "${e.javaClass.simpleName}: ${e.message ?: "Android could not submit the SMS."}", null)
         }
     }
 }
