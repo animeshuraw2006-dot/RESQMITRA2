@@ -623,6 +623,7 @@ class _AuthPageState extends State<AuthPage> {
             '${OneSignal.Notifications.permission}',
           );
         }
+      }
       if (!mounted) return;
       appState.signedIn = Supabase.instance.client.auth.currentSession != null;
       final signedInUser = Supabase.instance.client.auth.currentUser;
