@@ -31,7 +31,8 @@ Future<void> main() async {
   if (oneSignalAppId.trim().isNotEmpty) {
     OneSignal.initialize(oneSignalAppId.trim());
     // Foreground pushes need explicit display + an in-app siren. Background
-    // Android pushes use the custom high-priority notification channel below.
+    // pushes use the channel configured by OneSignal/Android unless a valid
+    // app-specific channel ID is explicitly configured on the server.
     OneSignal.Notifications.addForegroundWillDisplayListener((event) {
       unawaited(_playIncomingSosSiren());
       event.notification.display();

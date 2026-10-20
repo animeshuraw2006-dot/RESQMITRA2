@@ -66,7 +66,8 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         app_id: oneSignalAppId,
         target_channel: 'push',
-        android_channel_id: 'resq_sos_alerts_v1',
+        // Do not pin a channel ID here unless that channel is created/configured
+        // in OneSignal for this exact Android app. An unknown ID causes HTTP 400.
         include_aliases: { external_id: responderIds },
         headings: { en: title },
         contents: { en: `${String(body.emergency_type ?? 'Emergency').slice(0, 120)}. Open RESQ-MITRA to view and accept the request.` },
