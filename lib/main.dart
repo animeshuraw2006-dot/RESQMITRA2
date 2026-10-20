@@ -603,9 +603,26 @@ class _AuthPageState extends State<AuthPage> {
           return;
         }
       } else {
-        await Supabase.instance.client.auth.signInWithPassword(
-            email: email.text.trim(), password: password.text);
-      }
+        final result =
+            await Supabase.instance.client.auth.signInWithPassword(
+          email: email.text.trim(),
+          password: password.text,
+        );
+
+        final user = result.user;
+        if (user != null && oneSignalAppId.trim().isNotEmpty) {
+          OneSignal.login(user.id);
+
+          debugPrint('RESQ-MITRA: OneSignal login called for ${user.id}');
+          debugPrint(
+            'RESQ-MITRA: Push subscription ID: '
+            '${OneSignal.User.pushSubscription.id}',
+          );
+          debugPrint(
+            'RESQ-MITRA: Push permission: '
+            '${OneSignal.Notifications.permission}',
+          );
+        }
       if (!mounted) return;
       appState.signedIn = Supabase.instance.client.auth.currentSession != null;
       final signedInUser = Supabase.instance.client.auth.currentUser;
