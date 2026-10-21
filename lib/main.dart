@@ -16,6 +16,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
+import 'package:torch_light/torch_light.dart';
 
 const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const supabaseKey = String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
@@ -57,6 +58,8 @@ Future<void> main() async {
       supabaseInitializationError = error.runtimeType.toString();
     }
   }
+  final prefs = await SharedPreferences.getInstance();
+  appMode = prefs.getString('resq_mitra_app_mode') ?? 'both';
   runApp(const ResqMitraApp());
 }
 
@@ -68,6 +71,9 @@ const blue = Color(0xFF0876C9);
 const pink = Color(0xFFD41472);
 const yellow = Color(0xFFFFC928);
 const pale = Color(0xFFF4F8FC);
+
+/// Selected entry mode: help_seeker, rescuer, or both.
+String appMode = 'both';
 
 class ResqMitraApp extends StatelessWidget {
   const ResqMitraApp({super.key});
@@ -439,7 +445,7 @@ class _SplashPageState extends State<SplashPage> {
     Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => hasSession ? const HomePage() : const AuthPage(),
+          builder: (_) => hasSession ? const RoleSelectionPage() : const AuthPage(),
         ));
   }
 
@@ -817,7 +823,7 @@ class _PermissionsPageState extends State<PermissionsPage> {
           const SizedBox(height: 16),
           FilledButton(
               onPressed: () => Navigator.pushReplacement(
-                  context, MaterialPageRoute(builder: (_) => const HomePage())),
+                  context, MaterialPageRoute(builder: (_) => const RoleSelectionPage())),
               child: const Text('CONTINUE')),
           const SizedBox(height: 8),
           const Text(
@@ -932,6 +938,67 @@ String formatSosSms(
   return '🚨 RESQ-MITRA SOS ALERT 🚨\n\nName: $userName\nSOS Type: $sosType\nDate: $date\nTime: $clock\n$location\n\nThis person may need immediate assistance. Please contact them or send help.';
 }
 
+class RoleSelectionPage extends StatefulWidget {
+  const RoleSelectionPage({super.key});
+  @override
+  State<RoleSelectionPage> createState() => _RoleSelectionPageState();
+}
+
+class _RoleSelectionPageState extends State<RoleSelectionPage> {
+  String selected = appMode;
+  Future<void> continueWithMode() async {
+    appMode = selected;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('resq_mitra_app_mode', selected);
+    if (!mounted) return;
+    final Widget page = selected == 'rescuer'
+        ? const ResponderPage()
+        : const HomePage();
+    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => page));
+  }
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Choose your role')),
+    body: SafeArea(child: ListView(padding: const EdgeInsets.all(22), children: [
+      const SizedBox(height: 8),
+      Center(child: Image.asset('assets/resq_mitra_logo.jpeg', width: 110, height: 110,
+        errorBuilder: (_, __, ___) => const Icon(Icons.health_and_safety, size: 90, color: green))),
+      const SizedBox(height: 12),
+      const Text('Join ResQMitra', textAlign: TextAlign.center,
+        style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: navy)),
+      const Text('Choose how you want to use ResQMitra.', textAlign: TextAlign.center,
+        style: TextStyle(fontSize: 17)),
+      const SizedBox(height: 24),
+      _roleCard('help_seeker', Icons.shield_outlined, 'HELP SEEKER', 'Need assistance', blue),
+      const SizedBox(height: 12),
+      _roleCard('rescuer', Icons.person, 'AS RESCUER', 'Help others', green),
+      const SizedBox(height: 12),
+      _roleCard('both', Icons.diversity_3, 'BOTH', 'Seek help and respond', const Color(0xFF078F86)),
+      const SizedBox(height: 20),
+      const Text('TOGETHER, WE SAVE LIVES.', textAlign: TextAlign.center,
+        style: TextStyle(color: Color(0xFF078F86), fontSize: 17, fontWeight: FontWeight.w900)),
+      const SizedBox(height: 18),
+      FilledButton(onPressed: continueWithMode,
+        style: FilledButton.styleFrom(backgroundColor: blue, padding: const EdgeInsets.symmetric(vertical: 17)),
+        child: const Text('CONTINUE', style: TextStyle(fontWeight: FontWeight.w900))),
+    ])),
+  );
+  Widget _roleCard(String value, IconData icon, String title, String subtitle, Color color) {
+    final active = selected == value;
+    return InkWell(onTap: () => setState(() => selected = value), borderRadius: BorderRadius.circular(18),
+      child: Container(padding: const EdgeInsets.all(18), decoration: BoxDecoration(
+        color: active ? color.withValues(alpha: .09) : Colors.white,
+        border: Border.all(color: active ? color : const Color(0xFFB9D0DA), width: active ? 2 : 1),
+        borderRadius: BorderRadius.circular(18)),
+        child: Row(children: [Icon(icon, size: 42, color: color), const SizedBox(width: 16),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: color)),
+            Text(subtitle),
+          ])), Icon(active ? Icons.radio_button_checked : Icons.radio_button_off, color: color)])),
+    );
+  }
+}
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
   @override
@@ -940,6 +1007,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   bool _sirenActive = false;
+  bool _torchOn = false;
   int _sirenColorIndex = 0;
   Timer? _sirenBlinkTimer;
   final AudioPlayer _manualSirenPlayer = AudioPlayer();
@@ -1014,14 +1082,39 @@ class _HomePageState extends State<HomePage> {
               Scaffold(
                 appBar: AppBar(title: const Text('RESQ-MITRA'), actions: [
                   IconButton(
+                    tooltip: 'Change use mode',
+                    onPressed: () => Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const RoleSelectionPage())),
+                    icon: const Icon(Icons.switch_account),
+                  ),
+                  if (appMode != 'help_seeker') IconButton(
                       tooltip: 'Responder mode',
-                      onPressed: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => const ResponderPage())),
+                      onPressed: () => Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => const ResponderPage())),
                       icon: const Icon(Icons.volunteer_activism))
                 ]),
                 body: ListView(padding: const EdgeInsets.all(18), children: [
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: OutlinedButton.icon(
+                      icon: Icon(_torchOn ? Icons.flashlight_off : Icons.flashlight_on),
+                      label: Text(_torchOn ? 'FLASH OFF' : 'FLASH ON'),
+                      onPressed: () async {
+                        try {
+                          if (_torchOn) {
+                            await TorchLight.disableTorch();
+                          } else {
+                            await TorchLight.enableTorch();
+                          }
+                          if (mounted) setState(() => _torchOn = !_torchOn);
+                        } catch (_) {
+                          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Flash is unavailable. Check camera/flash hardware and permission.')),
+                          );
+                        }
+                      },
+                    ),
+                  ),
                   Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
@@ -1039,46 +1132,12 @@ class _HomePageState extends State<HomePage> {
                             onTap: () => Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                    builder: (_) => const SosTypesPage())),
-                            borderRadius: BorderRadius.circular(100),
-                            child: Container(
-                                width: 174,
-                                height: 174,
-                                decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: red,
-                                    boxShadow: [
-                                      BoxShadow(
-                                          color: red.withValues(alpha: .28),
-                                          blurRadius: 28,
-                                          spreadRadius: 5)
-                                    ]),
-                                child: const Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.sos,
-                                          color: Colors.white, size: 58),
-                                      Text('SOS',
-                                          style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 32,
-                                              fontWeight: FontWeight.w900)),
-                                      Text('GET HELP',
-                                          style: TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.bold))
-                                    ]))),
-                        const SizedBox(height: 16),
-                        InkWell(
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
                                     builder: (_) => const HighAlertPage())),
                             borderRadius: BorderRadius.circular(22),
                             child: Container(
                                 width: double.infinity,
                                 padding: const EdgeInsets.symmetric(
-                                    vertical: 20, horizontal: 14),
+                                    vertical: 12, horizontal: 12),
                                 decoration: BoxDecoration(
                                     color: const Color(0xFF69000B),
                                     borderRadius: BorderRadius.circular(22),
@@ -1093,7 +1152,7 @@ class _HomePageState extends State<HomePage> {
                                     ]),
                                 child: const Row(children: [
                                   Icon(Icons.warning_rounded,
-                                      color: Colors.white, size: 46),
+                                      color: Colors.white, size: 32),
                                   SizedBox(width: 14),
                                   Expanded(
                                       child: Column(
@@ -1103,7 +1162,7 @@ class _HomePageState extends State<HomePage> {
                                         Text('HIGH ALERT SOS',
                                             style: TextStyle(
                                                 color: Colors.white,
-                                                fontSize: 22,
+                                                fontSize: 18,
                                                 fontWeight: FontWeight.w900,
                                                 letterSpacing: .6)),
                                         SizedBox(height: 4),
@@ -1116,6 +1175,35 @@ class _HomePageState extends State<HomePage> {
                                   Icon(Icons.arrow_forward_ios,
                                       color: Colors.white)
                                 ]))),
+                        const SizedBox(height: 16),
+                        InkWell(
+                            onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const SosTypesPage())),
+                            borderRadius: BorderRadius.circular(100),
+                            child: Container(
+                                width: 224,
+                                height: 224,
+                                decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: red,
+                                    boxShadow: [
+                                      BoxShadow(
+                                          color: red.withValues(alpha: .28),
+                                          blurRadius: 28,
+                                          spreadRadius: 5)
+                                    ]),
+                                child: const Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text('SOS',
+                                          style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 48,
+                                              letterSpacing: 1.5,
+                                              fontWeight: FontWeight.w900))
+                                    ]))),
                         const SizedBox(height: 16),
                         const Text(
                             'Choose an emergency type for standard SOS. High Alert sends an immediate-danger request after its 5-second countdown.',

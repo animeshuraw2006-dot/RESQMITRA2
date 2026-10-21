@@ -84,6 +84,11 @@ begin
   insert into public.profiles(id, display_name, phone, role)
   values (new.id, coalesce(new.raw_user_meta_data ->> 'display_name',''), new.phone, 'citizen')
   on conflict (id) do nothing;
+  -- Every account has a responder-profile row, but it is not eligible to receive
+  -- SOS alerts until an administrator verifies it and the user is available.
+  insert into public.responder_profiles(user_id, verified, available)
+  values (new.id, false, false)
+  on conflict (user_id) do nothing;
   return new;
 end; $$;
 drop trigger if exists on_auth_user_created on auth.users;
