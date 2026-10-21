@@ -1100,15 +1100,20 @@ class _HomePageState extends State<HomePage> {
                       icon: Icon(_torchOn ? Icons.flashlight_off : Icons.flashlight_on),
                       label: Text(_torchOn ? 'FLASH OFF' : 'FLASH ON'),
                       onPressed: () async {
+                        // Capture the messenger before awaiting so no BuildContext
+                        // is read after the asynchronous gap.
+                        final messenger = ScaffoldMessenger.of(context);
                         try {
                           if (_torchOn) {
                             await TorchLight.disableTorch();
                           } else {
                             await TorchLight.enableTorch();
                           }
-                          if (mounted) setState(() => _torchOn = !_torchOn);
+                          if (!mounted) return;
+                          setState(() => _torchOn = !_torchOn);
                         } catch (_) {
-                          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+                          if (!messenger.mounted) return;
+                          messenger.showSnackBar(
                             const SnackBar(content: Text('Flash is unavailable. Check camera/flash hardware and permission.')),
                           );
                         }
