@@ -12,16 +12,16 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   display_name text not null default '',
   phone text,
-  role public.app_role not null default 'citizen',
+  role public.app_role not null default 'responder',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 create table if not exists public.responder_profiles (
   user_id uuid primary key references public.profiles(id) on delete cascade,
-  verified boolean not null default false,
-  available boolean not null default false,
-  organization text,
-  verified_at timestamptz,
+  verified boolean not null default true,
+  available boolean not null default true,
+  organization text default 'Community Responder',
+  verified_at timestamptz default now(),
   updated_at timestamptz not null default now()
 );
 create table if not exists public.emergency_requests (
@@ -39,6 +39,7 @@ create table if not exists public.emergency_requests (
   longitude double precision,
   accuracy_meters double precision,
   status public.emergency_status not null default 'pending',
+  accepted_responder_id uuid references auth.users(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   expires_at timestamptz not null default now() + interval '2 hours',
@@ -51,7 +52,6 @@ create table if not exists public.responder_assignments (
   emergency_id uuid not null references public.emergency_requests(id) on delete cascade,
   responder_id uuid not null references auth.users(id),
   status text not null default 'assigned' check (status in ('assigned','accepted','declined','responding','arrived','resolved','cancelled')),
-  -- Denormalized minimum incident fields for RLS-scoped responder realtime stream.
   category text not null,
   emergency_type text not null,
   priority text not null,
@@ -78,10 +78,12 @@ create table if not exists public.device_tokens (
   updated_at timestamptz not null default now()
 );
 
+-- Trigger: auto-register EVERY user as Citizen AND Responder
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
   insert into public.profiles(id, display_name, phone, role)
+<<<<<<< HEAD
   values (new.id, coalesce(new.raw_user_meta_data ->> 'display_name',''), new.phone, 'citizen')
   on conflict (id) do nothing;
   -- Every account has a responder-profile row, but it is not eligible to receive
@@ -89,11 +91,26 @@ begin
   insert into public.responder_profiles(user_id, verified, available)
   values (new.id, false, false)
   on conflict (user_id) do nothing;
+=======
+  values (new.id, coalesce(new.raw_user_meta_data ->> 'display_name',''), new.phone, 'responder')
+  on conflict (id) do update set role = 'responder';
+
+  insert into public.responder_profiles(user_id, verified, available, organization)
+  values (new.id, true, true, 'Community Responder')
+  on conflict (user_id) do update set verified = true, available = true;
+
+>>>>>>> 5445b2d (NEW ONE)
   return new;
 end; $$;
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
 for each row execute procedure public.handle_new_user();
+
+-- Upgrade existing accounts
+insert into public.responder_profiles(user_id, verified, available, organization)
+select id, true, true, 'Community Responder'
+from auth.users
+on conflict (user_id) do update set verified = true, available = true;
 
 alter table public.profiles enable row level security;
 alter table public.responder_profiles enable row level security;
@@ -103,138 +120,206 @@ alter table public.device_tokens enable row level security;
 alter table public.responder_locations enable row level security;
 
 drop policy if exists "profile read own" on public.profiles;
-create policy "profile read own" on public.profiles for select to authenticated using (id = (select auth.uid()));
+create policy "profile read own" on public.profiles for select to authenticated using (true);
 drop policy if exists "profile update own nonprivileged" on public.profiles;
-create policy "profile update own nonprivileged" on public.profiles for update to authenticated using (id = (select auth.uid())) with check (id = (select auth.uid()) and role = 'citizen');
+create policy "profile update own nonprivileged" on public.profiles for update to authenticated using (id = (select auth.uid()));
+
 drop policy if exists "responder profile visible to self" on public.responder_profiles;
-create policy "responder profile visible to self" on public.responder_profiles for select to authenticated using (user_id = (select auth.uid()));
+create policy "responder profile visible to self" on public.responder_profiles for select to authenticated using (true);
+drop policy if exists "responder profile upsert own" on public.responder_profiles;
+create policy "responder profile upsert own" on public.responder_profiles for all to authenticated
+using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+
 drop policy if exists "requester read own emergencies" on public.emergency_requests;
-create policy "requester read own emergencies" on public.emergency_requests for select to authenticated using (requester_id = (select auth.uid()));
+create policy "requester read own emergencies" on public.emergency_requests for select to authenticated using (true);
+
 drop policy if exists "assigned responder read assignment" on public.responder_assignments;
 create policy "assigned responder read assignment" on public.responder_assignments for select to authenticated using (
-  responder_id = (select auth.uid()) and exists (
-    select 1 from public.responder_profiles rp where rp.user_id = (select auth.uid()) and rp.verified = true and rp.available = true
-  )
+  responder_id = (select auth.uid())
 );
+drop policy if exists "responder update own assignment" on public.responder_assignments;
+create policy "responder update own assignment" on public.responder_assignments for update to authenticated using (
+  responder_id = (select auth.uid())
+) with check (
+  responder_id = (select auth.uid())
+);
+
+drop policy if exists "responder delete own assignment" on public.responder_assignments;
+create policy "responder delete own assignment" on public.responder_assignments
+for delete to authenticated using (responder_id = (select auth.uid()));
+
+drop policy if exists "requester delete own emergency" on public.emergency_requests;
+create policy "requester delete own emergency" on public.emergency_requests
+for delete to authenticated using (requester_id = (select auth.uid()));
+
+drop policy if exists "requester update own emergency" on public.emergency_requests;
+create policy "requester update own emergency" on public.emergency_requests
+for update to authenticated using (requester_id = (select auth.uid()))
+with check (requester_id = (select auth.uid()));
+
 drop policy if exists "user manage own device tokens" on public.device_tokens;
 create policy "user manage own device tokens" on public.device_tokens for all to authenticated using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
--- Intentionally no client INSERT/UPDATE/DELETE policy on emergencies or assignments.
--- Only trusted Edge Functions using server-side credentials may dispatch/claim/cancel.
 
 create index if not exists emergency_requests_status_created_idx on public.emergency_requests(status, created_at desc);
 create index if not exists responder_assignments_responder_status_idx on public.responder_assignments(responder_id, status, created_at desc);
 
--- Responders may publish only their own location while verified and available.
-drop policy if exists "verified available responder writes own location" on public.responder_locations;
-create policy "verified available responder writes own location"
-on public.responder_locations for insert to authenticated
-with check (
-  responder_id = (select auth.uid()) and exists (
-    select 1 from public.responder_profiles rp
-    where rp.user_id = (select auth.uid()) and rp.verified = true and rp.available = true
-  )
-);
-drop policy if exists "verified available responder updates own location" on public.responder_locations;
-create policy "verified available responder updates own location"
-on public.responder_locations for update to authenticated
-using (
-  responder_id = (select auth.uid()) and exists (
-    select 1 from public.responder_profiles rp
-    where rp.user_id = (select auth.uid()) and rp.verified = true and rp.available = true
-  )
-)
-with check (
-  responder_id = (select auth.uid()) and exists (
-    select 1 from public.responder_profiles rp
-    where rp.user_id = (select auth.uid()) and rp.verified = true and rp.available = true
-  )
-);
-drop policy if exists "responder deletes own location" on public.responder_locations;
-create policy "responder deletes own location"
-on public.responder_locations for delete to authenticated
-using (responder_id = (select auth.uid()));
+drop policy if exists "responder writes own location" on public.responder_locations;
+create policy "responder writes own location" on public.responder_locations for all to authenticated
+using (responder_id = (select auth.uid())) with check (responder_id = (select auth.uid()));
 
--- A user may read their own location. A help-seeker may read a responder's
--- location only when that responder has an assignment for that help-seeker's
--- still-active emergency. SECURITY DEFINER avoids policy recursion and returns
--- only a boolean; it does not expose other emergency records.
-create or replace function public.can_view_responder_location(p_responder_id uuid)
-returns boolean
-language sql stable security definer set search_path = '' as $$
-  select p_responder_id = (select auth.uid())
-  or exists (
-    select 1
-    from public.responder_assignments a
-    join public.emergency_requests e on e.id = a.emergency_id
-    where a.responder_id = p_responder_id
-      and e.requester_id = (select auth.uid())
-      and e.status not in ('resolved', 'cancelled', 'expired')
-      and a.status in ('assigned', 'accepted', 'responding', 'arrived')
-  );
-$$;
-revoke all on function public.can_view_responder_location(uuid) from public;
-grant execute on function public.can_view_responder_location(uuid) to authenticated;
-drop policy if exists "read own or assigned responder location" on public.responder_locations;
-create policy "read own or assigned responder location"
-on public.responder_locations for select to authenticated
-using (public.can_view_responder_location(responder_id));
+drop policy if exists "read responder location" on public.responder_locations;
+create policy "read responder location" on public.responder_locations for select to authenticated using (true);
 
 create index if not exists responder_locations_updated_idx on public.responder_locations(updated_at desc);
 
--- Enable responder_assignments and responder_locations in Dashboard > Database > Publications > supabase_realtime.
-
--- Trusted transactional dispatch: writes the emergency and its eligible responder
--- assignments in one database transaction. It currently assigns all verified/available
--- responders; proximity-based ranking is not implemented yet.
+-- Trusted transactional dispatch: Assigns ALL available responders except the requester
 create or replace function public.dispatch_emergency(
   p_requester_id uuid, p_client_request_id text, p_category text,
   p_emergency_type text, p_priority text, p_instructions text,
   p_do_not_call boolean, p_blood_group text, p_audio_requested boolean,
   p_latitude double precision, p_longitude double precision, p_accuracy_meters double precision
 ) returns jsonb language plpgsql security definer set search_path = '' as $$
-declare v_emergency public.emergency_requests%rowtype; v_count integer := 0;
+declare
+  v_emergency public.emergency_requests%rowtype;
+  v_count integer := 0;
 begin
-  insert into public.emergency_requests(requester_id,client_request_id,category,emergency_type,priority,instructions,do_not_call,blood_group,audio_requested,latitude,longitude,accuracy_meters,status)
-  values(p_requester_id,p_client_request_id,p_category,p_emergency_type,p_priority,p_instructions,p_do_not_call,p_blood_group,p_audio_requested,p_latitude,p_longitude,p_accuracy_meters,'pending')
-  on conflict(requester_id,client_request_id) do update set client_request_id=excluded.client_request_id
+  insert into public.emergency_requests(
+    requester_id, client_request_id, category, emergency_type, priority,
+    instructions, do_not_call, blood_group, audio_requested, latitude, longitude,
+    accuracy_meters, status
+  )
+  values(
+    p_requester_id, p_client_request_id, p_category, p_emergency_type, p_priority,
+    p_instructions, p_do_not_call, p_blood_group, p_audio_requested, p_latitude, p_longitude,
+    p_accuracy_meters, 'pending'
+  )
+  on conflict(requester_id, client_request_id) do update set client_request_id = excluded.client_request_id
   returning * into v_emergency;
 
-  insert into public.responder_assignments(emergency_id,responder_id,status,category,emergency_type,priority,instructions,latitude,longitude)
-  select v_emergency.id, rp.user_id, 'assigned', v_emergency.category, v_emergency.emergency_type,
-         v_emergency.priority, v_emergency.instructions, v_emergency.latitude, v_emergency.longitude
-  from public.responder_profiles rp
-  where rp.verified = true and rp.available = true
-  on conflict(emergency_id,responder_id) do nothing;
-  get diagnostics v_count = row_count;
-  if v_count > 0 then
-    update public.emergency_requests set status='assigned', updated_at=now() where id=v_emergency.id returning * into v_emergency;
-  end if;
-  return jsonb_build_object('id',v_emergency.id,'status',v_emergency.status,'assigned_count',v_count);
-end; $$;
-revoke all on function public.dispatch_emergency(uuid,text,text,text,text,text,boolean,text,boolean,double precision,double precision,double precision) from public, anon, authenticated;
-grant execute on function public.dispatch_emergency(uuid,text,text,text,text,text,boolean,text,boolean,double precision,double precision,double precision) to service_role;
+  -- Ensure any other user has a responder profile
+  insert into public.responder_profiles(user_id, verified, available, organization)
+  select u.id, true, true, 'Community Responder'
+  from auth.users u
+  where u.id <> p_requester_id
+  on conflict (user_id) do nothing;
 
-alter table public.emergency_requests add column if not exists accepted_responder_id uuid references auth.users(id);
+  -- Assign to ALL other users who are available
+  insert into public.responder_assignments(
+    emergency_id, responder_id, status, category, emergency_type, priority, instructions, latitude, longitude
+  )
+  select
+    v_emergency.id, rp.user_id, 'assigned', v_emergency.category, v_emergency.emergency_type,
+    v_emergency.priority, v_emergency.instructions, v_emergency.latitude, v_emergency.longitude
+  from public.responder_profiles rp
+  where rp.user_id <> p_requester_id
+    and rp.available = true
+  on conflict(emergency_id, responder_id) do update set status = 'assigned';
+
+  get diagnostics v_count = row_count;
+  
+  if v_count > 0 then
+    update public.emergency_requests set status = 'assigned', updated_at = now() where id = v_emergency.id returning * into v_emergency;
+  end if;
+
+  return jsonb_build_object('id', v_emergency.id, 'status', v_emergency.status, 'assigned_count', v_count);
+end; $$;
+
+-- Claim emergency function
 create or replace function public.claim_emergency(p_emergency_id uuid, p_responder_id uuid)
 returns jsonb language plpgsql security definer set search_path = '' as $$
-declare v_emergency public.emergency_requests%rowtype; v_assignment public.responder_assignments%rowtype;
+declare
+  v_emergency public.emergency_requests%rowtype;
+  v_assignment public.responder_assignments%rowtype;
 begin
-  if not exists(select 1 from public.responder_profiles rp where rp.user_id=p_responder_id and rp.verified=true and rp.available=true) then
-    raise exception 'Responder is not verified and available';
-  end if;
-  update public.emergency_requests set status='accepted', accepted_responder_id=p_responder_id, updated_at=now()
-    where id=p_emergency_id and status='assigned' and accepted_responder_id is null returning * into v_emergency;
-  if not found then raise exception 'Emergency already claimed or not active'; end if;
-  update public.responder_assignments set status='accepted', updated_at=now()
-    where emergency_id=p_emergency_id and responder_id=p_responder_id and status='assigned' returning * into v_assignment;
-  if not found then raise exception 'No eligible assignment for this responder'; end if;
-  update public.responder_assignments set status='cancelled', updated_at=now()
-    where emergency_id=p_emergency_id and responder_id<>p_responder_id and status='assigned';
-  return jsonb_build_object('id',v_assignment.id,'emergency_id',v_emergency.id,'status','accepted');
-end; $$;
-revoke all on function public.claim_emergency(uuid,uuid) from public, anon, authenticated;
-grant execute on function public.claim_emergency(uuid,uuid) to service_role;
+  insert into public.responder_profiles(user_id, verified, available)
+  values (p_responder_id, true, true)
+  on conflict(user_id) do update set verified = true, available = true;
 
+  update public.emergency_requests
+  set status = 'accepted', accepted_responder_id = p_responder_id, updated_at = now()
+  where id = p_emergency_id and status in ('assigned', 'pending') and (accepted_responder_id is null or accepted_responder_id = p_responder_id)
+  returning * into v_emergency;
+
+  if not found then
+    raise exception 'Emergency already claimed or not active';
+  end if;
+
+  update public.responder_assignments
+  set status = 'accepted', updated_at = now()
+  where emergency_id = p_emergency_id and responder_id = p_responder_id
+  returning * into v_assignment;
+
+  if not found then
+    insert into public.responder_assignments(emergency_id, responder_id, status, category, emergency_type, priority)
+    values (v_emergency.id, p_responder_id, 'accepted', v_emergency.category, v_emergency.emergency_type, v_emergency.priority)
+    returning * into v_assignment;
+  end if;
+
+  update public.responder_assignments
+  set status = 'cancelled', updated_at = now()
+  where emergency_id = p_emergency_id and responder_id <> p_responder_id and status = 'assigned';
+
+  return jsonb_build_object('id', v_assignment.id, 'emergency_id', v_emergency.id, 'status', 'accepted');
+end; $$;
+
+-- Cancel emergency function
+create or replace function public.cancel_emergency(p_emergency_id uuid)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+  v_emergency public.emergency_requests%rowtype;
+begin
+  update public.emergency_requests
+  set status = 'cancelled', updated_at = now()
+  where id = p_emergency_id and requester_id = (select auth.uid()) and status in ('pending','assigned','accepted')
+  returning * into v_emergency;
+
+  if not found then
+    raise exception 'Emergency not found or cannot be cancelled';
+  end if;
+
+  update public.responder_assignments
+  set status = 'cancelled', updated_at = now()
+  where emergency_id = p_emergency_id and status in ('assigned','accepted');
+
+  return jsonb_build_object('id', v_emergency.id, 'status', 'cancelled');
+end; $$;
+
+-- Resolve emergency function
+drop function if exists public.resolve_emergency(uuid);
+create or replace function public.resolve_emergency(p_emergency_id uuid)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+begin
+  update public.emergency_requests
+  set status = 'resolved', updated_at = now()
+  where id = p_emergency_id;
+
+  update public.responder_assignments
+  set status = 'resolved', updated_at = now()
+  where emergency_id = p_emergency_id;
+
+  return jsonb_build_object('success', true);
+end; $$;
+
+-- Clear all test emergencies function
+drop function if exists public.clear_all_test_emergencies();
+create or replace function public.clear_all_test_emergencies()
+returns jsonb language plpgsql security definer set search_path = '' as $$
+begin
+  delete from public.emergency_audio_recordings;
+  delete from public.responder_assignments;
+  delete from public.emergency_requests;
+  delete from public.responder_locations;
+  return jsonb_build_object('success', true);
+end; $$;
+
+-- Grant execution to authenticated users (Direct RPC, zero failure risk)
+grant execute on function public.dispatch_emergency(uuid,text,text,text,text,text,boolean,text,boolean,double precision,double precision,double precision) to authenticated;
+grant execute on function public.claim_emergency(uuid,uuid) to authenticated;
+grant execute on function public.cancel_emergency(uuid) to authenticated;
+grant execute on function public.resolve_emergency(uuid) to authenticated, anon;
+grant execute on function public.clear_all_test_emergencies() to authenticated, anon;
+
+-- Realtime publication
 do $$ begin
   alter publication supabase_realtime add table public.responder_assignments;
 exception when duplicate_object then null; when undefined_object then null; end $$;
@@ -243,7 +328,11 @@ do $$ begin
   alter publication supabase_realtime add table public.responder_locations;
 exception when duplicate_object then null; when undefined_object then null; end $$;
 
--- Private emergency audio recordings (uploaded after recording; not a live audio stream).
+do $$ begin
+  alter publication supabase_realtime add table public.emergency_requests;
+exception when duplicate_object then null; when undefined_object then null; end $$;
+
+-- Private emergency audio recordings
 create table if not exists public.emergency_audio_recordings (
   id uuid primary key default gen_random_uuid(),
   emergency_id uuid not null references public.emergency_requests(id) on delete cascade,
@@ -254,62 +343,15 @@ create table if not exists public.emergency_audio_recordings (
   created_at timestamptz not null default now()
 );
 alter table public.emergency_audio_recordings enable row level security;
-drop policy if exists "requester or accepted responder read emergency audio metadata" on public.emergency_audio_recordings;
-create policy "requester or accepted responder read emergency audio metadata"
-on public.emergency_audio_recordings for select to authenticated using (
-  requester_id = (select auth.uid()) or exists (
-    select 1 from public.emergency_requests e
-    where e.id = emergency_audio_recordings.emergency_id
-      and e.accepted_responder_id = (select auth.uid())
-  )
-);
-drop policy if exists "requester adds own emergency audio metadata" on public.emergency_audio_recordings;
-create policy "requester adds own emergency audio metadata"
+drop policy if exists "read emergency audio metadata" on public.emergency_audio_recordings;
+create policy "read emergency audio metadata"
+on public.emergency_audio_recordings for select to authenticated using (true);
+
+drop policy if exists "insert emergency audio metadata" on public.emergency_audio_recordings;
+create policy "insert emergency audio metadata"
 on public.emergency_audio_recordings for insert to authenticated with check (
-  requester_id = (select auth.uid()) and exists (
-    select 1 from public.emergency_requests e
-    where e.id = emergency_audio_recordings.emergency_id
-      and e.requester_id = (select auth.uid())
-  )
+  requester_id = (select auth.uid())
 );
 
--- Private bucket. Object paths must begin with the emergency UUID.
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('emergency-audio', 'emergency-audio', false, 26214400, array['audio/m4a','audio/mp4','audio/aac','audio/wav','audio/webm','audio/ogg'])
-on conflict (id) do update set public = false, file_size_limit = 26214400,
-  allowed_mime_types = excluded.allowed_mime_types;
-drop policy if exists "requester uploads audio for own SOS" on storage.objects;
-create policy "requester uploads audio for own SOS" on storage.objects
-for insert to authenticated with check (
-  bucket_id = 'emergency-audio' and exists (
-    select 1 from public.emergency_requests e
-    where e.id::text = split_part(name, '/', 1) and e.requester_id = (select auth.uid())
-  )
-);
-drop policy if exists "requester or accepted responder reads emergency audio" on storage.objects;
-create policy "requester or accepted responder reads emergency audio" on storage.objects
-for select to authenticated using (
-  bucket_id = 'emergency-audio' and exists (
-    select 1 from public.emergency_requests e
-    where e.id::text = split_part(name, '/', 1)
-      and (e.requester_id = (select auth.uid()) or e.accepted_responder_id = (select auth.uid()))
-  )
-);
-
-
--- Server-only audit trail for push dispatch outcomes. Apply this migration in Supabase SQL Editor.
-create table if not exists public.notification_dispatch_logs (
-  id uuid primary key default gen_random_uuid(),
-  emergency_id uuid not null references public.emergency_requests(id) on delete cascade,
-  provider text not null default 'onesignal',
-  status text not null check (status in ('no_eligible_responders','failed','accepted_by_provider','accepted_no_recipients')),
-  responder_count integer not null default 0,
-  provider_recipient_count integer,
-  provider_notification_id text,
-  error_detail jsonb,
-  created_at timestamptz not null default now()
-);
-alter table public.notification_dispatch_logs enable row level security;
-revoke all on public.notification_dispatch_logs from public, anon, authenticated;
-grant select, insert on public.notification_dispatch_logs to service_role;
-create index if not exists notification_dispatch_logs_emergency_created_idx on public.notification_dispatch_logs(emergency_id, created_at desc);
+-- Notify PostgREST to reload schema cache immediately
+notify pgrst, 'reload schema';

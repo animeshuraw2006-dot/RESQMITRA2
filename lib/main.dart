@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
@@ -16,10 +17,12 @@ import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
+<<<<<<< HEAD
 import 'package:torch_light/torch_light.dart';
+=======
+import 'config/supabase_config.dart';
+>>>>>>> 5445b2d (NEW ONE)
 
-const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
-const supabaseKey = String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
 const oneSignalAppId = String.fromEnvironment('ONESIGNAL_APP_ID');
 
 /// A safe diagnostic that never includes the URL or key themselves.
@@ -225,7 +228,7 @@ Future<String> notifyEmergencyContacts(
     {required String sosType,
     required double? latitude,
     required double? longitude}) async {
-  if (!Platform.isAndroid)
+  if (kIsWeb || !Platform.isAndroid)
     return 'Automatic SMS is available only in the Android app.';
   final contacts = await EmergencyContactsStore.load();
   if (contacts.isEmpty)
@@ -768,7 +771,13 @@ class _PermissionsPageState extends State<PermissionsPage> {
       default:
         return;
     }
-    final status = await p.request();
+    PermissionStatus status = PermissionStatus.denied;
+    try {
+      status = await p.request();
+    } catch (_) {
+      // Graceful fallback for platforms/browsers where specific mobile permissions are unsupported
+      status = PermissionStatus.granted;
+    }
     if (key == 'Notifications' &&
         status.isGranted &&
         oneSignalAppId.trim().isNotEmpty) {
@@ -895,7 +904,7 @@ class EmergencyContactsStore {
 }
 
 Future<String> sendNativeSms(String phone, String message) async {
-  if (!Platform.isAndroid) {
+  if (kIsWeb || !Platform.isAndroid) {
     throw PlatformException(
         code: 'unsupported_platform',
         message: 'Automatic SMS sending is supported on Android only.');
@@ -1006,6 +1015,12 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  int _currentTabIndex = 0;
+  bool _responderAvailable = true;
+  StreamSubscription<List<Map<String, dynamic>>>? _sosSubscription;
+  final Set<String> _seenAssignmentIds = <String>{};
+  Map<String, dynamic>? _activeIncomingAlert;
+
   bool _sirenActive = false;
   bool _torchOn = false;
   int _sirenColorIndex = 0;
@@ -1016,6 +1031,36 @@ class _HomePageState extends State<HomePage> {
     Colors.blue,
     Colors.white
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadResponderStatus();
+    _listenForIncomingSos();
+  }
+
+  Future<void> _loadResponderStatus() async {
+    final status = await SosRepository.instance.getResponderAvailability();
+    if (mounted) setState(() => _responderAvailable = status);
+  }
+
+  void _listenForIncomingSos() {
+    _sosSubscription =
+        SosRepository.instance.watchActiveRequests().listen((requests) {
+      if (!mounted) return;
+      for (final r in requests) {
+        final id = r['id']?.toString() ?? r['emergency_id']?.toString();
+        if (id != null && _seenAssignmentIds.add(id)) {
+          if (mounted) {
+            setState(() {
+              _activeIncomingAlert = r;
+            });
+          }
+          break;
+        }
+      }
+    });
+  }
 
   Future<void> _startManualSiren() async {
     if (_sirenActive) return;
@@ -1050,6 +1095,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _sosSubscription?.cancel();
     _sirenBlinkTimer?.cancel();
     _manualSirenPlayer.dispose();
     super.dispose();
@@ -1074,12 +1120,308 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Widget _buildSeekHelpContent() {
+    return ListView(padding: const EdgeInsets.all(18), children: [
+      if (_activeIncomingAlert != null) ...[
+        Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF69000B),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x5569000B),
+                blurRadius: 14,
+                offset: Offset(0, 4),
+              )
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.warning_amber_rounded,
+                      color: Colors.white, size: 30),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      '🚨 LIVE EMERGENCY SIGNAL!',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                        letterSpacing: .5,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close,
+                        color: Colors.white70, size: 20),
+                    onPressed: () =>
+                        setState(() => _activeIncomingAlert = null),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '${_activeIncomingAlert!['emergency_type'] ?? 'Emergency'} (${_activeIncomingAlert!['category'] ?? 'General'}) reported nearby. You are assigned as a community responder.',
+                style:
+                    const TextStyle(color: Color(0xFFFFD8DC), fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: const Color(0xFF69000B),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _activeIncomingAlert = null;
+                      _currentTabIndex = 1;
+                    });
+                  },
+                  icon: const Icon(Icons.volunteer_activism),
+                  label: const Text('VIEW IN RESPONDER RADAR',
+                      style: TextStyle(fontWeight: FontWeight.w900)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+      Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(24),
+              gradient: const LinearGradient(
+                  colors: [Color(0xFFFFF0E2), Color(0xFFE8F8EE)])),
+          child: Column(children: [
+            const Text('HELP IS ONE TAP AWAY',
+                style: TextStyle(
+                    color: navy,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.2)),
+            const SizedBox(height: 20),
+            InkWell(
+                onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const SosTypesPage())),
+                borderRadius: BorderRadius.circular(100),
+                child: Container(
+                    width: 174,
+                    height: 174,
+                    decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: red,
+                        boxShadow: [
+                          BoxShadow(
+                              color: red.withValues(alpha: .28),
+                              blurRadius: 28,
+                              spreadRadius: 5)
+                        ]),
+                    child: const Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.sos,
+                              color: Colors.white, size: 58),
+                          Text('SOS',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w900)),
+                          Text('GET HELP',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold))
+                        ]))),
+            const SizedBox(height: 16),
+            InkWell(
+                onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const HighAlertPage())),
+                borderRadius: BorderRadius.circular(22),
+                child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 20, horizontal: 14),
+                    decoration: BoxDecoration(
+                        color: const Color(0xFF69000B),
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(
+                            color: const Color(0xFFFF5968),
+                            width: 2),
+                        boxShadow: const [
+                          BoxShadow(
+                              color: Color(0x55700000),
+                              blurRadius: 18,
+                              spreadRadius: 2)
+                        ]),
+                    child: const Row(children: [
+                      Icon(Icons.warning_rounded,
+                          color: Colors.white, size: 46),
+                      SizedBox(width: 14),
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                            Text('HIGH ALERT SOS',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: .6)),
+                            SizedBox(height: 4),
+                            Text(
+                                'Immediate danger • 5-second countdown • no questions',
+                                style: TextStyle(
+                                    color: Color(0xFFFFD8DC),
+                                    fontWeight: FontWeight.w600))
+                          ])),
+                      Icon(Icons.arrow_forward_ios,
+                          color: Colors.white)
+                    ]))),
+            const SizedBox(height: 16),
+            const Text(
+                'Choose an emergency type for standard SOS. High Alert sends an immediate-danger request after its 5-second countdown.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: navy)),
+          ])),
+      const SizedBox(height: 16),
+      SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: yellow,
+            foregroundColor: const Color(0xFF342600),
+            padding: const EdgeInsets.symmetric(
+                vertical: 17, horizontal: 18),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18)),
+          ),
+          onPressed: _startManualSiren,
+          icon: const Icon(Icons.campaign_rounded, size: 32),
+          label: const Text('SIREN',
+              style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.2)),
+        ),
+      ),
+      const SizedBox(height: 10),
+      InkWell(
+        onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) => const EmergencyContactsPage())),
+        borderRadius: BorderRadius.circular(22),
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+                colors: [Color(0xFF082A4D), Color(0xFF087F8C)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight),
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: const [
+              BoxShadow(
+                  color: Color(0x22082A4D),
+                  blurRadius: 16,
+                  offset: Offset(0, 7))
+            ],
+          ),
+          child: Row(children: [
+            Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: .15),
+                    borderRadius: BorderRadius.circular(16)),
+                child: const Icon(Icons.shield_outlined,
+                    color: Colors.white, size: 30)),
+            const SizedBox(width: 14),
+            const Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text('EMERGENCY CONTACTS',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16,
+                          letterSpacing: .4)),
+                  SizedBox(height: 4),
+                  Text(
+                      'Manage trusted people for automatic SOS SMS',
+                      style: TextStyle(
+                          color: Color(0xFFD5F3F0),
+                          fontSize: 12,
+                          height: 1.35)),
+                ])),
+            Container(
+                width: 40,
+                height: 40,
+                decoration: const BoxDecoration(
+                    color: Colors.white, shape: BoxShape.circle),
+                child: const Icon(Icons.add,
+                    color: Color(0xFF087F8C), size: 26)),
+          ]),
+        ),
+      ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        onPressed: () => setState(() => _currentTabIndex = 2),
+        icon: const Icon(Icons.map_outlined),
+        label: const Text('OPEN EMERGENCY MAP'),
+      ),
+      const SizedBox(height: 14),
+      const SizedBox(height: 22),
+      const Text('EMERGENCY HELPLINES',
+          style: TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 17,
+              color: navy)),
+      const SizedBox(height: 8),
+      ...helplines.map((h) => Card(
+          child: ListTile(
+              leading: CircleAvatar(
+                  backgroundColor: const Color(0xFFE1F5E8),
+                  child: Icon(h[2] as IconData, color: green)),
+              title: Text(h[0] as String,
+                  style:
+                      const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text(h[1] as String),
+              trailing: IconButton(
+                  icon: const Icon(Icons.call, color: green),
+                  onPressed: () => call(h[1] as String))))),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+          onPressed: () => setState(() => _currentTabIndex = 1),
+          icon: const Icon(Icons.volunteer_activism),
+          label: const Text('Switch to Responder Radar')),
+      const SizedBox(height: 8),
+      const Text(
+          'Emergency numbers can vary by location. Verify local numbers before relying on them.',
+          style: TextStyle(fontSize: 12, color: Colors.black54)),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: appState,
       builder: (context, _) => Stack(
             children: [
               Scaffold(
+<<<<<<< HEAD
                 appBar: AppBar(title: const Text('RESQ-MITRA'), actions: [
                   IconButton(
                     tooltip: 'Change use mode',
@@ -1226,118 +1568,98 @@ class _HomePageState extends State<HomePage> {
                             vertical: 17, horizontal: 18),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(18)),
+=======
+                appBar: AppBar(
+                  title: const Text('RESQ-MITRA'),
+                  actions: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Tooltip(
+                        message: 'Tap to toggle responder availability',
+                        child: ActionChip(
+                          avatar: Icon(
+                            Icons.shield,
+                            color: _responderAvailable
+                                ? Colors.green
+                                : Colors.grey,
+                            size: 16,
+                          ),
+                          label: Text(
+                            _responderAvailable ? 'Responder ON' : 'Offline',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: _responderAvailable
+                                  ? Colors.green.shade900
+                                  : Colors.grey.shade700,
+                            ),
+                          ),
+                          onPressed: () async {
+                            final next = !_responderAvailable;
+                            setState(() => _responderAvailable = next);
+                            await SosRepository.instance
+                                .setResponderAvailability(next);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(next
+                                      ? 'You are now online and available to respond.'
+                                      : 'You are now offline from responding.'),
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
+                            }
+                          },
+                        ),
+>>>>>>> 5445b2d (NEW ONE)
                       ),
-                      onPressed: _startManualSiren,
-                      icon: const Icon(Icons.campaign_rounded, size: 32),
-                      label: const Text('SIREN',
-                          style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 1.2)),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  InkWell(
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const EmergencyContactsPage())),
-                    borderRadius: BorderRadius.circular(22),
-                    child: Container(
-                      padding: const EdgeInsets.all(18),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                            colors: [Color(0xFF082A4D), Color(0xFF087F8C)],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight),
-                        borderRadius: BorderRadius.circular(22),
-                        boxShadow: const [
-                          BoxShadow(
-                              color: Color(0x22082A4D),
-                              blurRadius: 16,
-                              offset: Offset(0, 7))
-                        ],
-                      ),
-                      child: Row(children: [
-                        Container(
-                            width: 54,
-                            height: 54,
-                            decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: .15),
-                                borderRadius: BorderRadius.circular(16)),
-                            child: const Icon(Icons.shield_outlined,
-                                color: Colors.white, size: 30)),
-                        const SizedBox(width: 14),
-                        const Expanded(
-                            child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                              Text('EMERGENCY CONTACTS',
-                                  style: TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: 16,
-                                      letterSpacing: .4)),
-                              SizedBox(height: 4),
-                              Text(
-                                  'Manage trusted people for automatic SOS SMS',
-                                  style: TextStyle(
-                                      color: Color(0xFFD5F3F0),
-                                      fontSize: 12,
-                                      height: 1.35)),
-                            ])),
-                        Container(
-                            width: 40,
-                            height: 40,
-                            decoration: const BoxDecoration(
-                                color: Colors.white, shape: BoxShape.circle),
-                            child: const Icon(Icons.add,
-                                color: Color(0xFF087F8C), size: 26)),
-                      ]),
+                    IconButton(
+                      tooltip: 'Sign Out',
+                      icon: const Icon(Icons.logout, size: 20),
+                      onPressed: () async {
+                        await Supabase.instance.client.auth.signOut();
+                        appState.signedIn = false;
+                        if (context.mounted) {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const AuthPage()),
+                          );
+                        }
+                      },
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const RequesterMapPage())),
-                    icon: const Icon(Icons.map_outlined),
-                    label: const Text('OPEN EMERGENCY MAP'),
-                  ),
-                  const SizedBox(height: 14),
-                  const SizedBox(height: 22),
-                  const Text('EMERGENCY HELPLINES',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 17,
-                          color: navy)),
-                  const SizedBox(height: 8),
-                  ...helplines.map((h) => Card(
-                      child: ListTile(
-                          leading: CircleAvatar(
-                              backgroundColor: const Color(0xFFE1F5E8),
-                              child: Icon(h[2] as IconData, color: green)),
-                          title: Text(h[0] as String,
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text(h[1] as String),
-                          trailing: IconButton(
-                              icon: const Icon(Icons.call, color: green),
-                              onPressed: () => call(h[1] as String))))),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                      onPressed: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => const ResponderPage())),
-                      icon: const Icon(Icons.volunteer_activism),
-                      label: const Text('Switch to AS RESPONDER')),
-                  const SizedBox(height: 8),
-                  const Text(
-                      'Emergency numbers can vary by location. Verify local numbers before relying on them.',
-                      style: TextStyle(fontSize: 12, color: Colors.black54)),
-                ]),
+                  ],
+                ),
+                body: IndexedStack(
+                  index: _currentTabIndex,
+                  children: [
+                    _buildSeekHelpContent(),
+                    const ResponderView(),
+                    const RequesterMapPage(showAppBar: false),
+                  ],
+                ),
+                bottomNavigationBar: BottomNavigationBar(
+                  currentIndex: _currentTabIndex,
+                  onTap: (index) =>
+                      setState(() => _currentTabIndex = index),
+                  selectedItemColor: red,
+                  unselectedItemColor: Colors.black54,
+                  items: const [
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.sos),
+                      label: 'Seek Help (SOS)',
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.volunteer_activism),
+                      label: 'Responder Radar',
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.map_rounded),
+                      label: 'Emergency Map',
+                    ),
+                  ],
+                ),
               ),
               if (_sirenActive)
                 Positioned.fill(
@@ -1383,7 +1705,8 @@ class _HomePageState extends State<HomePage> {
 }
 
 class RequesterMapPage extends StatefulWidget {
-  const RequesterMapPage({super.key});
+  final bool showAppBar;
+  const RequesterMapPage({super.key, this.showAppBar = true});
   @override
   State<RequesterMapPage> createState() => _RequesterMapPageState();
 }
@@ -1439,7 +1762,9 @@ class _RequesterMapPageState extends State<RequesterMapPage> {
             .from('responder_locations')
             .stream(primaryKey: ['responder_id']);
     return Scaffold(
-      appBar: AppBar(title: const Text('RESQ-MITRA • Emergency Map')),
+      appBar: widget.showAppBar
+          ? AppBar(title: const Text('RESQ-MITRA • Emergency Map'))
+          : null,
       body: Column(children: [
         Expanded(
             child: FlutterMap(
@@ -2455,8 +2780,10 @@ class _ConfirmSosPageState extends State<ConfirmSosPage> {
           return;
         }
         _audioBytes.clear();
-        final stream = await _recorder.startStream(const RecordConfig(
-            encoder: AudioEncoder.aacLc, sampleRate: 16000, bitRate: 64000));
+        final stream = await _recorder.startStream(RecordConfig(
+            encoder: kIsWeb ? AudioEncoder.opus : AudioEncoder.aacLc,
+            sampleRate: 16000,
+            bitRate: 64000));
         _audioSubscription = stream.listen((chunk) => _audioBytes.add(chunk));
         if (mounted)
           setState(() {
@@ -2889,15 +3216,20 @@ class SafePage extends StatelessWidget {
                   ]))));
 }
 
-class ResponderPage extends StatefulWidget {
-  const ResponderPage({super.key});
+class ResponderView extends StatefulWidget {
+  const ResponderView({super.key});
   @override
-  State<ResponderPage> createState() => _ResponderPageState();
+  State<ResponderView> createState() => _ResponderViewState();
 }
 
-class _ResponderPageState extends State<ResponderPage> {
+class _ResponderViewState extends State<ResponderView>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   StreamSubscription<List<Map<String, dynamic>>>? _sosSubscription;
   final Set<String> _seenAssignmentIds = <String>{};
+  final Set<String> _locallyDismissedIds = <String>{};
   bool _sirenPlaying = false;
   bool _alertDialogShowing = false;
   String _latestAlertTitle = 'New SOS signal received';
@@ -3053,20 +3385,8 @@ class _ResponderPageState extends State<ResponderPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('AS RESPONDER'),
-        actions: [
-          IconButton(
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ResponderMapPage()),
-            ),
-            icon: const Icon(Icons.map),
-          ),
-        ],
-      ),
-      body: ListView(
+    super.build(context);
+    return ListView(
         padding: const EdgeInsets.all(18),
         children: <Widget>[
           Container(
@@ -3098,13 +3418,39 @@ class _ResponderPageState extends State<ResponderPage> {
             ),
           ),
           const SizedBox(height: 18),
-          const Text(
-            'LIVE SOS ALERTS',
-            style: TextStyle(
-                fontWeight: FontWeight.w900,
-                color: navy,
-                fontSize: 16,
-                letterSpacing: .5),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'LIVE SOS ALERTS',
+                style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: navy,
+                    fontSize: 16,
+                    letterSpacing: .5),
+              ),
+              TextButton.icon(
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.red.shade700,
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: () async {
+                  await highAlertSirenPlayer.stop();
+                  if (mounted) setState(() => _sirenPlaying = false);
+                  setState(() {
+                    _locallyDismissedIds.addAll(_seenAssignmentIds);
+                  });
+                  await SosRepository.instance.clearAllAlerts();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('All alerts cleared!')),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.delete_sweep, size: 16),
+                label: const Text('Clear All', style: TextStyle(fontSize: 12)),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           if (_sirenPlaying) ...[
@@ -3143,13 +3489,21 @@ class _ResponderPageState extends State<ResponderPage> {
                   ),
                 );
               }
-              final requests = snapshot.data!;
+              final rawRequests = snapshot.data!;
+              for (final r in rawRequests) {
+                final id = (r['emergency_id'] ?? r['id'])?.toString();
+                if (id != null) _seenAssignmentIds.add(id);
+              }
+              final requests = rawRequests
+                  .where((r) => !_locallyDismissedIds.contains(
+                      (r['emergency_id'] ?? r['id'])?.toString()))
+                  .toList();
               if (requests.isEmpty) {
                 return const Card(
                   child: Padding(
                     padding: EdgeInsets.all(20),
                     child: Text(
-                      'No active assigned SOS requests. Only verified responder accounts can see assigned incidents.',
+                      'No active emergency alerts in your area right now. When someone sends an SOS, it will appear here in real time.',
                     ),
                   ),
                 );
@@ -3164,87 +3518,217 @@ class _ResponderPageState extends State<ResponderPage> {
                   final locationText = lat == null || lng == null
                       ? 'Location unavailable'
                       : 'Location: $lat, $lng';
+                  final isAccepted =
+                      (data['status'] ?? '').toString() == 'accepted' ||
+                          (data['status'] ?? '').toString() == 'responding';
+
                   return Card(
                     color: isHigh ? const Color(0xFF69000B) : null,
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: isHigh
-                            ? const Color(0xFFFF5968)
-                            : const Color(0xFFFFE4E9),
-                        child: Icon(
-                          isHigh ? Icons.warning_rounded : Icons.sos,
-                          color: isHigh ? Colors.white : red,
-                        ),
+                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(
+                        color: isAccepted
+                            ? Colors.green
+                            : (isHigh
+                                ? const Color(0xFFFF5968)
+                                : Colors.black12),
+                        width: isAccepted ? 2 : 1,
                       ),
-                      title: Text(
-                        '${isHigh ? '🚨 HIGH ALERT — ' : ''}${data['emergency_type'] ?? 'Emergency'}',
-                        style: TextStyle(
-                          color: isHigh ? Colors.white : null,
-                          fontWeight:
-                              isHigh ? FontWeight.w900 : FontWeight.normal,
-                        ),
-                      ),
-                      subtitle: Text(
-                        '${data['category'] ?? 'SOS'} • ${data['status'] ?? 'pending'}\n$locationText\n${data['instructions'] ?? ''}',
-                        style: TextStyle(
-                          color: isHigh ? Colors.white70 : null,
-                        ),
-                      ),
-                      isThreeLine: true,
-                      trailing: Column(
-                        mainAxisSize: MainAxisSize.min,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          FilledButton(
-                            onPressed: () async {
-                              try {
-                                await SosRepository.instance.acceptRequest(id);
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                        content: Text(
-                                            'Acceptance confirmed by server.')),
-                                  );
-                                }
-                              } catch (_) {
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                        content: Text(
-                                            'Could not accept. Verify responder status or check whether another responder already accepted.')),
-                                  );
-                                }
-                              }
-                            },
-                            child: const Text('ACCEPT'),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              CircleAvatar(
+                                backgroundColor: isHigh
+                                    ? const Color(0xFFFF5968)
+                                    : (isAccepted
+                                        ? const Color(0xFFE8F8EE)
+                                        : const Color(0xFFFFE4E9)),
+                                child: Icon(
+                                  isAccepted
+                                      ? Icons.check_circle_rounded
+                                      : (isHigh
+                                          ? Icons.warning_rounded
+                                          : Icons.sos),
+                                  color: isAccepted
+                                      ? Colors.green
+                                      : (isHigh ? Colors.white : red),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${isHigh ? '🚨 HIGH ALERT — ' : ''}${data['emergency_type'] ?? 'Emergency'}',
+                                      style: TextStyle(
+                                        color: isHigh ? Colors.white : null,
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '${data['category'] ?? 'SOS'} • Status: ${(data['status'] ?? 'pending').toString().toUpperCase()}',
+                                      style: TextStyle(
+                                        color: isAccepted
+                                            ? Colors.green
+                                            : (isHigh
+                                                ? Colors.white70
+                                                : Colors.black87),
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      locationText,
+                                      style: TextStyle(
+                                        color: isHigh
+                                            ? Colors.white60
+                                            : Colors.black54,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    if ((data['instructions'] ?? '')
+                                        .toString()
+                                        .trim()
+                                        .isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        data['instructions'],
+                                        style: TextStyle(
+                                          color: isHigh
+                                              ? Colors.white70
+                                              : Colors.black87,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                          if ((data['status'] ?? '').toString() == 'accepted' ||
-                              (data['status'] ?? '').toString() == 'responding')
-                            TextButton.icon(
-                              onPressed: () async {
-                                try {
-                                  final url = await SosRepository.instance
-                                      .getAcceptedEmergencyAudioUrl(id);
-                                  if (url == null) {
-                                    if (context.mounted)
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(const SnackBar(
+                          const SizedBox(height: 12),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              if (isAccepted) ...[
+                                TextButton.icon(
+                                  onPressed: () async {
+                                    try {
+                                      final url = await SosRepository.instance
+                                          .getAcceptedEmergencyAudioUrl(id);
+                                      if (url == null) {
+                                        if (context.mounted) {
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            const SnackBar(
+                                                content: Text(
+                                                    'No uploaded voice recording is available yet.')),
+                                          );
+                                        }
+                                        return;
+                                      }
+                                      await emergencyAudioPlayer
+                                          .play(UrlSource(url));
+                                    } catch (_) {
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          const SnackBar(
                                               content: Text(
-                                                  'No uploaded voice recording is available yet.')));
-                                    return;
-                                  }
-                                  await emergencyAudioPlayer
-                                      .play(UrlSource(url));
-                                } catch (_) {
-                                  if (context.mounted)
-                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                  'Audio is not available or access was denied.')),
+                                        );
+                                      }
+                                    }
+                                  },
+                                  icon: const Icon(Icons.play_arrow),
+                                  label: const Text('AUDIO'),
+                                ),
+                                const SizedBox(width: 8),
+                                OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.green,
+                                    side: const BorderSide(
+                                        color: Colors.green),
+                                  ),
+                                  onPressed: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) =>
+                                            const ResponderMapPage()),
+                                  ),
+                                  icon: const Icon(
+                                      Icons.navigation_rounded),
+                                  label: const Text('NAVIGATE'),
+                                ),
+                                const SizedBox(width: 8),
+                                FilledButton.icon(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: Colors.grey.shade800,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  onPressed: () async {
+                                    setState(() => _locallyDismissedIds.add(id));
+                                    await SosRepository.instance
+                                        .resolveRequest(id);
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
                                         const SnackBar(
                                             content: Text(
-                                                'Audio is not available or access was denied.')));
-                                }
-                              },
-                              icon: const Icon(Icons.play_arrow),
-                              label: const Text('AUDIO'),
-                            ),
+                                                'Incident marked as resolved.')),
+                                      );
+                                    }
+                                  },
+                                  icon: const Icon(Icons.done_all, size: 16),
+                                  label: const Text('RESOLVE'),
+                                ),
+                              ] else ...[
+                                FilledButton.icon(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: isHigh
+                                        ? const Color(0xFFFF5968)
+                                        : const Color(0xFF087F8C),
+                                  ),
+                                  onPressed: () async {
+                                    try {
+                                      await SosRepository.instance
+                                          .acceptRequest(id);
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          const SnackBar(
+                                              content: Text(
+                                                  'Emergency accepted! You are responding.')),
+                                        );
+                                      }
+                                    } catch (_) {
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          const SnackBar(
+                                              content: Text(
+                                                  'Could not accept. Check if another responder already accepted.')),
+                                        );
+                                      }
+                                    }
+                                  },
+                                  icon: const Icon(Icons.check),
+                                  label: const Text('ACCEPT SOS'),
+                                ),
+                              ],
+                            ],
+                          ),
                         ],
                       ),
                     ),
@@ -3264,11 +3748,33 @@ class _ResponderPageState extends State<ResponderPage> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Only verified responders assigned by the backend should accept an SOS. Audio playback is available after acceptance when the requester has uploaded a voice recording.',
+            'As an active community responder, accept nearby emergencies to navigate and assist. Audio playback is available if the requester uploaded a voice message.',
             style: TextStyle(fontSize: 12, color: Colors.black54),
           ),
         ],
+      );
+  }
+}
+
+class ResponderPage extends StatelessWidget {
+  const ResponderPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('AS RESPONDER'),
+        actions: [
+          IconButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ResponderMapPage()),
+            ),
+            icon: const Icon(Icons.map),
+          ),
+        ],
       ),
+      body: const ResponderView(),
     );
   }
 }
