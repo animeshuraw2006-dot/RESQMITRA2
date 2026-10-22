@@ -83,15 +83,6 @@ create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
   insert into public.profiles(id, display_name, phone, role)
-<<<<<<< HEAD
-  values (new.id, coalesce(new.raw_user_meta_data ->> 'display_name',''), new.phone, 'citizen')
-  on conflict (id) do nothing;
-  -- Every account has a responder-profile row, but it is not eligible to receive
-  -- SOS alerts until an administrator verifies it and the user is available.
-  insert into public.responder_profiles(user_id, verified, available)
-  values (new.id, false, false)
-  on conflict (user_id) do nothing;
-=======
   values (new.id, coalesce(new.raw_user_meta_data ->> 'display_name',''), new.phone, 'responder')
   on conflict (id) do update set role = 'responder';
 
@@ -99,7 +90,6 @@ begin
   values (new.id, true, true, 'Community Responder')
   on conflict (user_id) do update set verified = true, available = true;
 
->>>>>>> 5445b2d (NEW ONE)
   return new;
 end; $$;
 drop trigger if exists on_auth_user_created on auth.users;

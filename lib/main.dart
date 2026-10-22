@@ -17,11 +17,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
-<<<<<<< HEAD
-import 'package:torch_light/torch_light.dart';
-=======
 import 'config/supabase_config.dart';
->>>>>>> 5445b2d (NEW ONE)
 
 const oneSignalAppId = String.fromEnvironment('ONESIGNAL_APP_ID');
 
@@ -61,8 +57,6 @@ Future<void> main() async {
       supabaseInitializationError = error.runtimeType.toString();
     }
   }
-  final prefs = await SharedPreferences.getInstance();
-  appMode = prefs.getString('resq_mitra_app_mode') ?? 'both';
   runApp(const ResqMitraApp());
 }
 
@@ -74,9 +68,6 @@ const blue = Color(0xFF0876C9);
 const pink = Color(0xFFD41472);
 const yellow = Color(0xFFFFC928);
 const pale = Color(0xFFF4F8FC);
-
-/// Selected entry mode: help_seeker, rescuer, or both.
-String appMode = 'both';
 
 class ResqMitraApp extends StatelessWidget {
   const ResqMitraApp({super.key});
@@ -448,7 +439,7 @@ class _SplashPageState extends State<SplashPage> {
     Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => hasSession ? const RoleSelectionPage() : const AuthPage(),
+          builder: (_) => hasSession ? const HomePage() : const AuthPage(),
         ));
   }
 
@@ -832,7 +823,7 @@ class _PermissionsPageState extends State<PermissionsPage> {
           const SizedBox(height: 16),
           FilledButton(
               onPressed: () => Navigator.pushReplacement(
-                  context, MaterialPageRoute(builder: (_) => const RoleSelectionPage())),
+                  context, MaterialPageRoute(builder: (_) => const HomePage())),
               child: const Text('CONTINUE')),
           const SizedBox(height: 8),
           const Text(
@@ -947,67 +938,6 @@ String formatSosSms(
   return '🚨 RESQ-MITRA SOS ALERT 🚨\n\nName: $userName\nSOS Type: $sosType\nDate: $date\nTime: $clock\n$location\n\nThis person may need immediate assistance. Please contact them or send help.';
 }
 
-class RoleSelectionPage extends StatefulWidget {
-  const RoleSelectionPage({super.key});
-  @override
-  State<RoleSelectionPage> createState() => _RoleSelectionPageState();
-}
-
-class _RoleSelectionPageState extends State<RoleSelectionPage> {
-  String selected = appMode;
-  Future<void> continueWithMode() async {
-    appMode = selected;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('resq_mitra_app_mode', selected);
-    if (!mounted) return;
-    final Widget page = selected == 'rescuer'
-        ? const ResponderPage()
-        : const HomePage();
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => page));
-  }
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Choose your role')),
-    body: SafeArea(child: ListView(padding: const EdgeInsets.all(22), children: [
-      const SizedBox(height: 8),
-      Center(child: Image.asset('assets/resq_mitra_logo.jpeg', width: 110, height: 110,
-        errorBuilder: (_, __, ___) => const Icon(Icons.health_and_safety, size: 90, color: green))),
-      const SizedBox(height: 12),
-      const Text('Join ResQMitra', textAlign: TextAlign.center,
-        style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: navy)),
-      const Text('Choose how you want to use ResQMitra.', textAlign: TextAlign.center,
-        style: TextStyle(fontSize: 17)),
-      const SizedBox(height: 24),
-      _roleCard('help_seeker', Icons.shield_outlined, 'HELP SEEKER', 'Need assistance', blue),
-      const SizedBox(height: 12),
-      _roleCard('rescuer', Icons.person, 'AS RESCUER', 'Help others', green),
-      const SizedBox(height: 12),
-      _roleCard('both', Icons.diversity_3, 'BOTH', 'Seek help and respond', const Color(0xFF078F86)),
-      const SizedBox(height: 20),
-      const Text('TOGETHER, WE SAVE LIVES.', textAlign: TextAlign.center,
-        style: TextStyle(color: Color(0xFF078F86), fontSize: 17, fontWeight: FontWeight.w900)),
-      const SizedBox(height: 18),
-      FilledButton(onPressed: continueWithMode,
-        style: FilledButton.styleFrom(backgroundColor: blue, padding: const EdgeInsets.symmetric(vertical: 17)),
-        child: const Text('CONTINUE', style: TextStyle(fontWeight: FontWeight.w900))),
-    ])),
-  );
-  Widget _roleCard(String value, IconData icon, String title, String subtitle, Color color) {
-    final active = selected == value;
-    return InkWell(onTap: () => setState(() => selected = value), borderRadius: BorderRadius.circular(18),
-      child: Container(padding: const EdgeInsets.all(18), decoration: BoxDecoration(
-        color: active ? color.withValues(alpha: .09) : Colors.white,
-        border: Border.all(color: active ? color : const Color(0xFFB9D0DA), width: active ? 2 : 1),
-        borderRadius: BorderRadius.circular(18)),
-        child: Row(children: [Icon(icon, size: 42, color: color), const SizedBox(width: 16),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: color)),
-            Text(subtitle),
-          ])), Icon(active ? Icons.radio_button_checked : Icons.radio_button_off, color: color)])),
-    );
-  }
-}
-
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
   @override
@@ -1022,7 +952,6 @@ class _HomePageState extends State<HomePage> {
   Map<String, dynamic>? _activeIncomingAlert;
 
   bool _sirenActive = false;
-  bool _torchOn = false;
   int _sirenColorIndex = 0;
   Timer? _sirenBlinkTimer;
   final AudioPlayer _manualSirenPlayer = AudioPlayer();
@@ -1421,154 +1350,6 @@ class _HomePageState extends State<HomePage> {
       builder: (context, _) => Stack(
             children: [
               Scaffold(
-<<<<<<< HEAD
-                appBar: AppBar(title: const Text('RESQ-MITRA'), actions: [
-                  IconButton(
-                    tooltip: 'Change use mode',
-                    onPressed: () => Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const RoleSelectionPage())),
-                    icon: const Icon(Icons.switch_account),
-                  ),
-                  if (appMode != 'help_seeker') IconButton(
-                      tooltip: 'Responder mode',
-                      onPressed: () => Navigator.push(context,
-                          MaterialPageRoute(builder: (_) => const ResponderPage())),
-                      icon: const Icon(Icons.volunteer_activism))
-                ]),
-                body: ListView(padding: const EdgeInsets.all(18), children: [
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: OutlinedButton.icon(
-                      icon: Icon(_torchOn ? Icons.flashlight_off : Icons.flashlight_on),
-                      label: Text(_torchOn ? 'FLASH OFF' : 'FLASH ON'),
-                      onPressed: () async {
-                        // Capture the messenger before awaiting so no BuildContext
-                        // is read after the asynchronous gap.
-                        final messenger = ScaffoldMessenger.of(context);
-                        try {
-                          if (_torchOn) {
-                            await TorchLight.disableTorch();
-                          } else {
-                            await TorchLight.enableTorch();
-                          }
-                          if (!mounted) return;
-                          setState(() => _torchOn = !_torchOn);
-                        } catch (_) {
-                          if (!messenger.mounted) return;
-                          messenger.showSnackBar(
-                            const SnackBar(content: Text('Flash is unavailable. Check camera/flash hardware and permission.')),
-                          );
-                        }
-                      },
-                    ),
-                  ),
-                  Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(24),
-                          gradient: const LinearGradient(
-                              colors: [Color(0xFFFFF0E2), Color(0xFFE8F8EE)])),
-                      child: Column(children: [
-                        const Text('HELP IS ONE TAP AWAY',
-                            style: TextStyle(
-                                color: navy,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 1.2)),
-                        const SizedBox(height: 20),
-                        InkWell(
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const HighAlertPage())),
-                            borderRadius: BorderRadius.circular(22),
-                            child: Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.symmetric(
-                                    vertical: 12, horizontal: 12),
-                                decoration: BoxDecoration(
-                                    color: const Color(0xFF69000B),
-                                    borderRadius: BorderRadius.circular(22),
-                                    border: Border.all(
-                                        color: const Color(0xFFFF5968),
-                                        width: 2),
-                                    boxShadow: const [
-                                      BoxShadow(
-                                          color: Color(0x55700000),
-                                          blurRadius: 18,
-                                          spreadRadius: 2)
-                                    ]),
-                                child: const Row(children: [
-                                  Icon(Icons.warning_rounded,
-                                      color: Colors.white, size: 32),
-                                  SizedBox(width: 14),
-                                  Expanded(
-                                      child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                        Text('HIGH ALERT SOS',
-                                            style: TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 18,
-                                                fontWeight: FontWeight.w900,
-                                                letterSpacing: .6)),
-                                        SizedBox(height: 4),
-                                        Text(
-                                            'Immediate danger • 5-second countdown • no questions',
-                                            style: TextStyle(
-                                                color: Color(0xFFFFD8DC),
-                                                fontWeight: FontWeight.w600))
-                                      ])),
-                                  Icon(Icons.arrow_forward_ios,
-                                      color: Colors.white)
-                                ]))),
-                        const SizedBox(height: 16),
-                        InkWell(
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const SosTypesPage())),
-                            borderRadius: BorderRadius.circular(100),
-                            child: Container(
-                                width: 224,
-                                height: 224,
-                                decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: red,
-                                    boxShadow: [
-                                      BoxShadow(
-                                          color: red.withValues(alpha: .28),
-                                          blurRadius: 28,
-                                          spreadRadius: 5)
-                                    ]),
-                                child: const Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Text('SOS',
-                                          style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 48,
-                                              letterSpacing: 1.5,
-                                              fontWeight: FontWeight.w900))
-                                    ]))),
-                        const SizedBox(height: 16),
-                        const Text(
-                            'Choose an emergency type for standard SOS. High Alert sends an immediate-danger request after its 5-second countdown.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: navy)),
-                      ])),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: yellow,
-                        foregroundColor: const Color(0xFF342600),
-                        padding: const EdgeInsets.symmetric(
-                            vertical: 17, horizontal: 18),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(18)),
-=======
                 appBar: AppBar(
                   title: const Text('RESQ-MITRA'),
                   actions: [
@@ -1611,7 +1392,6 @@ class _HomePageState extends State<HomePage> {
                             }
                           },
                         ),
->>>>>>> 5445b2d (NEW ONE)
                       ),
                     ),
                     IconButton(
