@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
@@ -17,8 +16,11 @@ import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
-import 'config/supabase_config.dart';
+import 'package:torch_light/torch_light.dart';
+import 'package:image_picker/image_picker.dart';
 
+const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+const supabaseKey = String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
 const oneSignalAppId = String.fromEnvironment('ONESIGNAL_APP_ID');
 
 /// A safe diagnostic that never includes the URL or key themselves.
@@ -57,6 +59,8 @@ Future<void> main() async {
       supabaseInitializationError = error.runtimeType.toString();
     }
   }
+  final prefs = await SharedPreferences.getInstance();
+  appMode = prefs.getString('resq_mitra_app_mode') ?? 'both';
   runApp(const ResqMitraApp());
 }
 
@@ -68,6 +72,9 @@ const blue = Color(0xFF0876C9);
 const pink = Color(0xFFD41472);
 const yellow = Color(0xFFFFC928);
 const pale = Color(0xFFF4F8FC);
+
+/// Selected entry mode: help_seeker, rescuer, or both.
+String appMode = 'both';
 
 class ResqMitraApp extends StatelessWidget {
   const ResqMitraApp({super.key});
@@ -213,13 +220,14 @@ class SosDraft {
   bool doNotCall = false;
   bool recordingRequested = false;
   Uint8List? recordedAudio;
+  final List<Uint8List> incidentPhotos = <Uint8List>[];
 }
 
 Future<String> notifyEmergencyContacts(
     {required String sosType,
     required double? latitude,
     required double? longitude}) async {
-  if (kIsWeb || !Platform.isAndroid)
+  if (!Platform.isAndroid)
     return 'Automatic SMS is available only in the Android app.';
   final contacts = await EmergencyContactsStore.load();
   if (contacts.isEmpty)
@@ -341,6 +349,16 @@ class AppState extends ChangeNotifier {
         databaseStatus =
             'SOS recorded • ${result['status'] ?? 'pending'} • Push: ${result['push_status'] ?? 'not reported'} (${result['onesignal_recipients'] ?? 0} recipients). SMS: $databaseStatus';
       }
+      if (activeRequestId != null && draft.incidentPhotos.isNotEmpty) {
+        try {
+          for (final photo in draft.incidentPhotos) {
+            await SosRepository.instance.uploadIncidentPhoto(activeRequestId!, photo);
+          }
+          databaseStatus = '$databaseStatus • ${draft.incidentPhotos.length} incident photo(s) uploaded';
+        } catch (e) {
+          databaseStatus = '$databaseStatus • Photo upload failed; check Supabase Storage setup';
+        }
+      }
       demoRequests.insert(0, {
         'type': draft.category,
         'emergency': draft.emergency,
@@ -439,7 +457,7 @@ class _SplashPageState extends State<SplashPage> {
     Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => hasSession ? const HomePage() : const AuthPage(),
+          builder: (_) => hasSession ? const RoleSelectionPage() : const AuthPage(),
         ));
   }
 
@@ -762,13 +780,7 @@ class _PermissionsPageState extends State<PermissionsPage> {
       default:
         return;
     }
-    PermissionStatus status = PermissionStatus.denied;
-    try {
-      status = await p.request();
-    } catch (_) {
-      // Graceful fallback for platforms/browsers where specific mobile permissions are unsupported
-      status = PermissionStatus.granted;
-    }
+    final status = await p.request();
     if (key == 'Notifications' &&
         status.isGranted &&
         oneSignalAppId.trim().isNotEmpty) {
@@ -823,7 +835,7 @@ class _PermissionsPageState extends State<PermissionsPage> {
           const SizedBox(height: 16),
           FilledButton(
               onPressed: () => Navigator.pushReplacement(
-                  context, MaterialPageRoute(builder: (_) => const HomePage())),
+                  context, MaterialPageRoute(builder: (_) => const RoleSelectionPage())),
               child: const Text('CONTINUE')),
           const SizedBox(height: 8),
           const Text(
@@ -895,7 +907,7 @@ class EmergencyContactsStore {
 }
 
 Future<String> sendNativeSms(String phone, String message) async {
-  if (kIsWeb || !Platform.isAndroid) {
+  if (!Platform.isAndroid) {
     throw PlatformException(
         code: 'unsupported_platform',
         message: 'Automatic SMS sending is supported on Android only.');
@@ -938,6 +950,306 @@ String formatSosSms(
   return '🚨 RESQ-MITRA SOS ALERT 🚨\n\nName: $userName\nSOS Type: $sosType\nDate: $date\nTime: $clock\n$location\n\nThis person may need immediate assistance. Please contact them or send help.';
 }
 
+class RoleSelectionPage extends StatefulWidget {
+  const RoleSelectionPage({super.key});
+
+  @override
+  State<RoleSelectionPage> createState() => _RoleSelectionPageState();
+}
+
+class _RoleSelectionPageState extends State<RoleSelectionPage> {
+  String selected = appMode;
+
+  static const Color _roleNavy = Color(0xFF103B60);
+  static const Color _roleBlue = Color(0xFF1688CC);
+  static const Color _roleGreen = Color(0xFF118D51);
+  static const Color _roleTeal = Color(0xFF079E95);
+
+  Future<void> continueWithMode() async {
+    appMode = selected;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('resq_mitra_app_mode', selected);
+    if (!mounted) return;
+    final Widget page = selected == 'rescuer'
+        ? const ResponderPage()
+        : const HomePage();
+    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => page));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFEEF8FF),
+      body: SafeArea(
+        bottom: false,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 380;
+            final side = compact ? 16.0 : 22.0;
+            return Column(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: EdgeInsets.fromLTRB(side, 12, side, 18),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Center(
+                          child: Image.asset(
+                            'assets/resq_mitra_logo.jpeg',
+                            width: compact ? 94 : 112,
+                            height: compact ? 94 : 112,
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, __, ___) => const Icon(
+                              Icons.health_and_safety,
+                              size: 96,
+                              color: _roleGreen,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Join ResQMitra',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: _roleNavy,
+                            fontSize: 34,
+                            height: 1.08,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.8,
+                          ),
+                        ),
+                        const SizedBox(height: 7),
+                        const Text(
+                          'Choose how you want to use ResQMitra.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Color(0xFF303840),
+                            fontSize: 16,
+                            height: 1.3,
+                          ),
+                        ),
+                        SizedBox(height: compact ? 22 : 28),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Expanded(
+                              child: _roleCard(
+                                value: 'help_seeker',
+                                title: 'Help Seeker',
+                                subtitle: 'Need Assistance',
+                                color: _roleBlue,
+                                icon: Icons.shield_outlined,
+                                compact: compact,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _roleCard(
+                                value: 'rescuer',
+                                title: 'Volunteer as Rescuer',
+                                subtitle: 'Help Others',
+                                color: _roleGreen,
+                                icon: Icons.person,
+                                compact: compact,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        _roleCard(
+                          value: 'both',
+                          title: 'Help Seeker and Rescuer',
+                          subtitle: 'Together, We Save Lives.',
+                          color: _roleTeal,
+                          icon: Icons.diversity_3,
+                          wide: true,
+                          compact: compact,
+                        ),
+                        SizedBox(height: compact ? 18 : 24),
+                        const Text(
+                          'BECOME A FORCE FOR CHANGE.\nUNITE. RESPOND. PROTECT.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: _roleNavy,
+                            fontSize: 17,
+                            height: 1.3,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: .1,
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        SizedBox(
+                          height: 58,
+                          child: ElevatedButton(
+                            onPressed: continueWithMode,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF168ED8),
+                              foregroundColor: Colors.white,
+                              elevation: 3,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(22),
+                              ),
+                            ),
+                            child: const Text(
+                              'Continue',
+                              style: TextStyle(
+                                fontSize: 19,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const _NavigationPill(),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _roleCard({
+    required String value,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required IconData icon,
+    bool wide = false,
+    required bool compact,
+  }) {
+    final active = selected == value;
+    return Semantics(
+      button: true,
+      selected: active,
+      label: '$title. $subtitle',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: () => setState(() => selected = value),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          constraints: BoxConstraints(minHeight: wide ? 132 : 218),
+          padding: EdgeInsets.symmetric(
+            horizontal: wide ? 18 : 10,
+            vertical: wide ? 16 : 14,
+          ),
+          decoration: BoxDecoration(
+            color: active ? const Color(0xFFE6FAFA) : Colors.white,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: active ? _roleTeal : const Color(0xFFD1E4ED),
+              width: active ? 2.2 : 1.4,
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x12164867),
+                blurRadius: 9,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: wide
+              ? Row(
+                  children: [
+                    Icon(icon, color: color, size: compact ? 54 : 64),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: TextStyle(
+                              color: color,
+                              fontSize: compact ? 17 : 20,
+                              fontWeight: FontWeight.w900,
+                              height: 1.15,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            subtitle,
+                            style: TextStyle(
+                              color: color,
+                              fontSize: compact ? 16 : 19,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _RoleRadioMark(color: color, selected: active),
+                  ],
+                )
+              : Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Align(
+                      alignment: Alignment.topRight,
+                      child: _RoleRadioMark(color: color, selected: active),
+                    ),
+                    Icon(icon, color: color, size: compact ? 48 : 58),
+                    const SizedBox(height: 12),
+                    Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _roleNavy,
+                        fontSize: compact ? 15 : 17,
+                        height: 1.15,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      subtitle,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: const Color(0xFF303840),
+                        fontSize: compact ? 13 : 15,
+                        height: 1.15,
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RoleRadioMark extends StatelessWidget {
+  const _RoleRadioMark({required this.color, required this.selected});
+
+  final Color color;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 26,
+        height: 26,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: color, width: 2.2),
+        ),
+        child: selected
+            ? Center(
+                child: Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                ),
+              )
+            : null,
+      );
+}
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
   @override
@@ -945,13 +1257,8 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  int _currentTabIndex = 0;
-  bool _responderAvailable = true;
-  StreamSubscription<List<Map<String, dynamic>>>? _sosSubscription;
-  final Set<String> _seenAssignmentIds = <String>{};
-  Map<String, dynamic>? _activeIncomingAlert;
-
   bool _sirenActive = false;
+  bool _torchOn = false;
   int _sirenColorIndex = 0;
   Timer? _sirenBlinkTimer;
   final AudioPlayer _manualSirenPlayer = AudioPlayer();
@@ -960,36 +1267,6 @@ class _HomePageState extends State<HomePage> {
     Colors.blue,
     Colors.white
   ];
-
-  @override
-  void initState() {
-    super.initState();
-    _loadResponderStatus();
-    _listenForIncomingSos();
-  }
-
-  Future<void> _loadResponderStatus() async {
-    final status = await SosRepository.instance.getResponderAvailability();
-    if (mounted) setState(() => _responderAvailable = status);
-  }
-
-  void _listenForIncomingSos() {
-    _sosSubscription =
-        SosRepository.instance.watchActiveRequests().listen((requests) {
-      if (!mounted) return;
-      for (final r in requests) {
-        final id = r['id']?.toString() ?? r['emergency_id']?.toString();
-        if (id != null && _seenAssignmentIds.add(id)) {
-          if (mounted) {
-            setState(() {
-              _activeIncomingAlert = r;
-            });
-          }
-          break;
-        }
-      }
-    });
-  }
 
   Future<void> _startManualSiren() async {
     if (_sirenActive) return;
@@ -1024,7 +1301,6 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
-    _sosSubscription?.cancel();
     _sirenBlinkTimer?.cancel();
     _manualSirenPlayer.dispose();
     super.dispose();
@@ -1049,397 +1325,266 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Widget _buildSeekHelpContent() {
-    return ListView(padding: const EdgeInsets.all(18), children: [
-      if (_activeIncomingAlert != null) ...[
-        Container(
-          margin: const EdgeInsets.only(bottom: 16),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFF69000B),
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x5569000B),
-                blurRadius: 14,
-                offset: Offset(0, 4),
-              )
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.warning_amber_rounded,
-                      color: Colors.white, size: 30),
-                  const SizedBox(width: 10),
-                  const Expanded(
-                    child: Text(
-                      '🚨 LIVE EMERGENCY SIGNAL!',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 16,
-                        letterSpacing: .5,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close,
-                        color: Colors.white70, size: 20),
-                    onPressed: () =>
-                        setState(() => _activeIncomingAlert = null),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '${_activeIncomingAlert!['emergency_type'] ?? 'Emergency'} (${_activeIncomingAlert!['category'] ?? 'General'}) reported nearby. You are assigned as a community responder.',
-                style:
-                    const TextStyle(color: Color(0xFFFFD8DC), fontSize: 13),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: const Color(0xFF69000B),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      _activeIncomingAlert = null;
-                      _currentTabIndex = 1;
-                    });
-                  },
-                  icon: const Icon(Icons.volunteer_activism),
-                  label: const Text('VIEW IN RESPONDER RADAR',
-                      style: TextStyle(fontWeight: FontWeight.w900)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-      Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(24),
-              gradient: const LinearGradient(
-                  colors: [Color(0xFFFFF0E2), Color(0xFFE8F8EE)])),
-          child: Column(children: [
-            const Text('HELP IS ONE TAP AWAY',
-                style: TextStyle(
-                    color: navy,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.2)),
-            const SizedBox(height: 20),
-            InkWell(
-                onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const SosTypesPage())),
-                borderRadius: BorderRadius.circular(100),
-                child: Container(
-                    width: 174,
-                    height: 174,
-                    decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: red,
-                        boxShadow: [
-                          BoxShadow(
-                              color: red.withValues(alpha: .28),
-                              blurRadius: 28,
-                              spreadRadius: 5)
-                        ]),
-                    child: const Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.sos,
-                              color: Colors.white, size: 58),
-                          Text('SOS',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 32,
-                                  fontWeight: FontWeight.w900)),
-                          Text('GET HELP',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold))
-                        ]))),
-            const SizedBox(height: 16),
-            InkWell(
-                onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const HighAlertPage())),
-                borderRadius: BorderRadius.circular(22),
-                child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 20, horizontal: 14),
-                    decoration: BoxDecoration(
-                        color: const Color(0xFF69000B),
-                        borderRadius: BorderRadius.circular(22),
-                        border: Border.all(
-                            color: const Color(0xFFFF5968),
-                            width: 2),
-                        boxShadow: const [
-                          BoxShadow(
-                              color: Color(0x55700000),
-                              blurRadius: 18,
-                              spreadRadius: 2)
-                        ]),
-                    child: const Row(children: [
-                      Icon(Icons.warning_rounded,
-                          color: Colors.white, size: 46),
-                      SizedBox(width: 14),
-                      Expanded(
-                          child: Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
-                              children: [
-                            Text('HIGH ALERT SOS',
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: .6)),
-                            SizedBox(height: 4),
-                            Text(
-                                'Immediate danger • 5-second countdown • no questions',
-                                style: TextStyle(
-                                    color: Color(0xFFFFD8DC),
-                                    fontWeight: FontWeight.w600))
-                          ])),
-                      Icon(Icons.arrow_forward_ios,
-                          color: Colors.white)
-                    ]))),
-            const SizedBox(height: 16),
-            const Text(
-                'Choose an emergency type for standard SOS. High Alert sends an immediate-danger request after its 5-second countdown.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: navy)),
-          ])),
-      const SizedBox(height: 16),
-      SizedBox(
-        width: double.infinity,
-        child: FilledButton.icon(
-          style: FilledButton.styleFrom(
-            backgroundColor: yellow,
-            foregroundColor: const Color(0xFF342600),
-            padding: const EdgeInsets.symmetric(
-                vertical: 17, horizontal: 18),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18)),
-          ),
-          onPressed: _startManualSiren,
-          icon: const Icon(Icons.campaign_rounded, size: 32),
-          label: const Text('SIREN',
-              style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.2)),
-        ),
-      ),
-      const SizedBox(height: 10),
-      InkWell(
-        onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-                builder: (_) => const EmergencyContactsPage())),
-        borderRadius: BorderRadius.circular(22),
-        child: Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-                colors: [Color(0xFF082A4D), Color(0xFF087F8C)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight),
-            borderRadius: BorderRadius.circular(22),
-            boxShadow: const [
-              BoxShadow(
-                  color: Color(0x22082A4D),
-                  blurRadius: 16,
-                  offset: Offset(0, 7))
-            ],
-          ),
-          child: Row(children: [
-            Container(
-                width: 54,
-                height: 54,
-                decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: .15),
-                    borderRadius: BorderRadius.circular(16)),
-                child: const Icon(Icons.shield_outlined,
-                    color: Colors.white, size: 30)),
-            const SizedBox(width: 14),
-            const Expanded(
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                  Text('EMERGENCY CONTACTS',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 16,
-                          letterSpacing: .4)),
-                  SizedBox(height: 4),
-                  Text(
-                      'Manage trusted people for automatic SOS SMS',
-                      style: TextStyle(
-                          color: Color(0xFFD5F3F0),
-                          fontSize: 12,
-                          height: 1.35)),
-                ])),
-            Container(
-                width: 40,
-                height: 40,
-                decoration: const BoxDecoration(
-                    color: Colors.white, shape: BoxShape.circle),
-                child: const Icon(Icons.add,
-                    color: Color(0xFF087F8C), size: 26)),
-          ]),
-        ),
-      ),
-      const SizedBox(height: 8),
-      OutlinedButton.icon(
-        onPressed: () => setState(() => _currentTabIndex = 2),
-        icon: const Icon(Icons.map_outlined),
-        label: const Text('OPEN EMERGENCY MAP'),
-      ),
-      const SizedBox(height: 14),
-      const SizedBox(height: 22),
-      const Text('EMERGENCY HELPLINES',
-          style: TextStyle(
-              fontWeight: FontWeight.w900,
-              fontSize: 17,
-              color: navy)),
-      const SizedBox(height: 8),
-      ...helplines.map((h) => Card(
-          child: ListTile(
-              leading: CircleAvatar(
-                  backgroundColor: const Color(0xFFE1F5E8),
-                  child: Icon(h[2] as IconData, color: green)),
-              title: Text(h[0] as String,
-                  style:
-                      const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text(h[1] as String),
-              trailing: IconButton(
-                  icon: const Icon(Icons.call, color: green),
-                  onPressed: () => call(h[1] as String))))),
-      const SizedBox(height: 8),
-      OutlinedButton.icon(
-          onPressed: () => setState(() => _currentTabIndex = 1),
-          icon: const Icon(Icons.volunteer_activism),
-          label: const Text('Switch to Responder Radar')),
-      const SizedBox(height: 8),
-      const Text(
-          'Emergency numbers can vary by location. Verify local numbers before relying on them.',
-          style: TextStyle(fontSize: 12, color: Colors.black54)),
-    ]);
-  }
-
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: appState,
       builder: (context, _) => Stack(
             children: [
               Scaffold(
-                appBar: AppBar(
-                  title: const Text('RESQ-MITRA'),
-                  actions: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Tooltip(
-                        message: 'Tap to toggle responder availability',
-                        child: ActionChip(
-                          avatar: Icon(
-                            Icons.shield,
-                            color: _responderAvailable
-                                ? Colors.green
-                                : Colors.grey,
-                            size: 16,
-                          ),
-                          label: Text(
-                            _responderAvailable ? 'Responder ON' : 'Offline',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: _responderAvailable
-                                  ? Colors.green.shade900
-                                  : Colors.grey.shade700,
-                            ),
-                          ),
-                          onPressed: () async {
-                            final next = !_responderAvailable;
-                            setState(() => _responderAvailable = next);
-                            await SosRepository.instance
-                                .setResponderAvailability(next);
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(next
-                                      ? 'You are now online and available to respond.'
-                                      : 'You are now offline from responding.'),
-                                  duration: const Duration(seconds: 2),
-                                ),
-                              );
-                            }
-                          },
-                        ),
-                      ),
-                    ),
+                appBar: AppBar(title: const Text('RESQ-MITRA'), actions: [
+                  if (appMode == 'both')
                     IconButton(
-                      tooltip: 'Sign Out',
-                      icon: const Icon(Icons.logout, size: 20),
+                      tooltip: 'Open responder dashboard',
+                      onPressed: () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const ResponderPage())),
+                      icon: const Icon(Icons.volunteer_activism),
+                    ),
+                ]),
+                body: ListView(padding: const EdgeInsets.all(18), children: [
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: OutlinedButton.icon(
+                      icon: Icon(_torchOn ? Icons.flashlight_off : Icons.flashlight_on),
+                      label: Text(_torchOn ? 'FLASH OFF' : 'FLASH ON'),
                       onPressed: () async {
-                        await Supabase.instance.client.auth.signOut();
-                        appState.signedIn = false;
-                        if (context.mounted) {
-                          Navigator.pushReplacement(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const AuthPage()),
+                        // Capture the messenger before awaiting so no BuildContext
+                        // is read after the asynchronous gap.
+                        final messenger = ScaffoldMessenger.of(context);
+                        try {
+                          if (_torchOn) {
+                            await TorchLight.disableTorch();
+                          } else {
+                            await TorchLight.enableTorch();
+                          }
+                          if (!mounted) return;
+                          setState(() => _torchOn = !_torchOn);
+                        } catch (_) {
+                          if (!messenger.mounted) return;
+                          messenger.showSnackBar(
+                            const SnackBar(content: Text('Flash is unavailable. Check camera/flash hardware and permission.')),
                           );
                         }
                       },
                     ),
-                  ],
-                ),
-                body: IndexedStack(
-                  index: _currentTabIndex,
-                  children: [
-                    _buildSeekHelpContent(),
-                    const ResponderView(),
-                    const RequesterMapPage(showAppBar: false),
-                  ],
-                ),
-                bottomNavigationBar: BottomNavigationBar(
-                  currentIndex: _currentTabIndex,
-                  onTap: (index) =>
-                      setState(() => _currentTabIndex = index),
-                  selectedItemColor: red,
-                  unselectedItemColor: Colors.black54,
-                  items: const [
-                    BottomNavigationBarItem(
-                      icon: Icon(Icons.sos),
-                      label: 'Seek Help (SOS)',
+                  ),
+                  Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(24),
+                          gradient: const LinearGradient(
+                              colors: [Color(0xFFFFF0E2), Color(0xFFE8F8EE)])),
+                      child: Column(children: [
+                        const Text('HELP IS ONE TAP AWAY',
+                            style: TextStyle(
+                                color: navy,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.2)),
+                        const SizedBox(height: 20),
+                        InkWell(
+                            onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const HighAlertPage())),
+                            borderRadius: BorderRadius.circular(22),
+                            child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 12, horizontal: 12),
+                                decoration: BoxDecoration(
+                                    color: const Color(0xFF69000B),
+                                    borderRadius: BorderRadius.circular(22),
+                                    border: Border.all(
+                                        color: const Color(0xFFFF5968),
+                                        width: 2),
+                                    boxShadow: const [
+                                      BoxShadow(
+                                          color: Color(0x55700000),
+                                          blurRadius: 18,
+                                          spreadRadius: 2)
+                                    ]),
+                                child: const Row(children: [
+                                  Icon(Icons.warning_rounded,
+                                      color: Colors.white, size: 32),
+                                  SizedBox(width: 14),
+                                  Expanded(
+                                      child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                        Text('HIGH ALERT SOS',
+                                            style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 18,
+                                                fontWeight: FontWeight.w900,
+                                                letterSpacing: .6)),
+                                        SizedBox(height: 4),
+                                        Text(
+                                            'Immediate danger • 5-second countdown • no questions',
+                                            style: TextStyle(
+                                                color: Color(0xFFFFD8DC),
+                                                fontWeight: FontWeight.w600))
+                                      ])),
+                                  Icon(Icons.arrow_forward_ios,
+                                      color: Colors.white)
+                                ]))),
+                        const SizedBox(height: 16),
+                        InkWell(
+                            onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const SosTypesPage())),
+                            borderRadius: BorderRadius.circular(100),
+                            child: Container(
+                                width: 224,
+                                height: 224,
+                                decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: red,
+                                    boxShadow: [
+                                      BoxShadow(
+                                          color: red.withValues(alpha: .28),
+                                          blurRadius: 28,
+                                          spreadRadius: 5)
+                                    ]),
+                                child: const Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text('SOS',
+                                          style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 48,
+                                              letterSpacing: 1.5,
+                                              fontWeight: FontWeight.w900))
+                                    ]))),
+                        const SizedBox(height: 16),
+                        const Text(
+                            'Choose an emergency type for standard SOS. High Alert sends an immediate-danger request after its 5-second countdown.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: navy)),
+                      ])),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: yellow,
+                        foregroundColor: const Color(0xFF342600),
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 17, horizontal: 18),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18)),
+                      ),
+                      onPressed: _startManualSiren,
+                      icon: const Icon(Icons.campaign_rounded, size: 32),
+                      label: const Text('SIREN',
+                          style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.2)),
                     ),
-                    BottomNavigationBarItem(
-                      icon: Icon(Icons.volunteer_activism),
-                      label: 'Responder Radar',
+                  ),
+                  const SizedBox(height: 10),
+                  InkWell(
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const EmergencyContactsPage())),
+                    borderRadius: BorderRadius.circular(22),
+                    child: Container(
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                            colors: [Color(0xFF082A4D), Color(0xFF087F8C)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight),
+                        borderRadius: BorderRadius.circular(22),
+                        boxShadow: const [
+                          BoxShadow(
+                              color: Color(0x22082A4D),
+                              blurRadius: 16,
+                              offset: Offset(0, 7))
+                        ],
+                      ),
+                      child: Row(children: [
+                        Container(
+                            width: 54,
+                            height: 54,
+                            decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: .15),
+                                borderRadius: BorderRadius.circular(16)),
+                            child: const Icon(Icons.shield_outlined,
+                                color: Colors.white, size: 30)),
+                        const SizedBox(width: 14),
+                        const Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                              Text('EMERGENCY CONTACTS',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 16,
+                                      letterSpacing: .4)),
+                              SizedBox(height: 4),
+                              Text(
+                                  'Manage trusted people for automatic SOS SMS',
+                                  style: TextStyle(
+                                      color: Color(0xFFD5F3F0),
+                                      fontSize: 12,
+                                      height: 1.35)),
+                            ])),
+                        Container(
+                            width: 40,
+                            height: 40,
+                            decoration: const BoxDecoration(
+                                color: Colors.white, shape: BoxShape.circle),
+                            child: const Icon(Icons.add,
+                                color: Color(0xFF087F8C), size: 26)),
+                      ]),
                     ),
-                    BottomNavigationBarItem(
-                      icon: Icon(Icons.map_rounded),
-                      label: 'Emergency Map',
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const RequesterMapPage())),
+                    icon: const Icon(Icons.map_outlined),
+                    label: const Text('OPEN EMERGENCY MAP'),
+                  ),
+                  const SizedBox(height: 14),
+                  const SizedBox(height: 22),
+                  const Text('EMERGENCY HELPLINES',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 17,
+                          color: navy)),
+                  const SizedBox(height: 8),
+                  ...helplines.map((h) => Card(
+                      child: ListTile(
+                          leading: CircleAvatar(
+                              backgroundColor: const Color(0xFFE1F5E8),
+                              child: Icon(h[2] as IconData, color: green)),
+                          title: Text(h[0] as String,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text(h[1] as String),
+                          trailing: IconButton(
+                              icon: const Icon(Icons.call, color: green),
+                              onPressed: () => call(h[1] as String))))),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                      onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const ResponderPage())),
+                      icon: const Icon(Icons.volunteer_activism),
+                      label: const Text('Switch to AS RESPONDER')),
+                  const SizedBox(height: 8),
+                  const Text(
+                      'Emergency numbers can vary by location. Verify local numbers before relying on them.',
+                      style: TextStyle(fontSize: 12, color: Colors.black54)),
+                ]),
               ),
               if (_sirenActive)
                 Positioned.fill(
@@ -1485,8 +1630,7 @@ class _HomePageState extends State<HomePage> {
 }
 
 class RequesterMapPage extends StatefulWidget {
-  final bool showAppBar;
-  const RequesterMapPage({super.key, this.showAppBar = true});
+  const RequesterMapPage({super.key});
   @override
   State<RequesterMapPage> createState() => _RequesterMapPageState();
 }
@@ -1542,9 +1686,7 @@ class _RequesterMapPageState extends State<RequesterMapPage> {
             .from('responder_locations')
             .stream(primaryKey: ['responder_id']);
     return Scaffold(
-      appBar: widget.showAppBar
-          ? AppBar(title: const Text('RESQ-MITRA • Emergency Map'))
-          : null,
+      appBar: AppBar(title: const Text('RESQ-MITRA • Emergency Map')),
       body: Column(children: [
         Expanded(
             child: FlutterMap(
@@ -2525,8 +2667,31 @@ class _ConfirmSosPageState extends State<ConfirmSosPage> {
   final BytesBuilder _audioBytes = BytesBuilder(copy: false);
   StreamSubscription<Uint8List>? _audioSubscription;
   bool recording = false;
+  final ImagePicker _imagePicker = ImagePicker();
+  String photoStatus = 'No incident photos selected.';
   String audioStatus =
       'Optional voice recording is uploaded securely with your SOS.';
+  Future<void> _pickIncidentPhotos() async {
+    try {
+      final files = await _imagePicker.pickMultiImage(imageQuality: 82, maxWidth: 1800);
+      if (files.isEmpty) return;
+      final bytes = <Uint8List>[];
+      for (final file in files.take(5)) {
+        bytes.add(await file.readAsBytes());
+      }
+      if (!mounted) return;
+      setState(() {
+        widget.draft.incidentPhotos
+          ..clear()
+          ..addAll(bytes);
+        photoStatus = '${bytes.length} photo(s) selected. They will upload after SOS confirmation.';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => photoStatus = 'Could not select photos. Check photo access and try again.');
+    }
+  }
+
   Future<void> _toggleRecording() async {
     if (recording) {
       try {
@@ -2560,10 +2725,8 @@ class _ConfirmSosPageState extends State<ConfirmSosPage> {
           return;
         }
         _audioBytes.clear();
-        final stream = await _recorder.startStream(RecordConfig(
-            encoder: kIsWeb ? AudioEncoder.opus : AudioEncoder.aacLc,
-            sampleRate: 16000,
-            bitRate: 64000));
+        final stream = await _recorder.startStream(const RecordConfig(
+            encoder: AudioEncoder.aacLc, sampleRate: 16000, bitRate: 64000));
         _audioSubscription = stream.listen((chunk) => _audioBytes.add(chunk));
         if (mounted)
           setState(() {
@@ -2653,6 +2816,24 @@ class _ConfirmSosPageState extends State<ConfirmSosPage> {
                   hintText:
                       'Describe the situation, exact landmark, injuries, or special instructions…')),
           const SizedBox(height: 14),
+          Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+              child: Column(children: [
+                IconButton.filledTonal(
+                  onPressed: _pickIncidentPhotos,
+                  icon: const Icon(Icons.add_a_photo_outlined),
+                  iconSize: 38,
+                ),
+                const Text('Add incident photos (optional)', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                Text(photoStatus, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                if (d.incidentPhotos.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Wrap(spacing: 6, children: [for (var i = 0; i < d.incidentPhotos.length; i++) Chip(label: Text('Photo ${i + 1}'))]),
+                ],
+              ])),
+          const SizedBox(height: 12),
           Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -2996,20 +3177,15 @@ class SafePage extends StatelessWidget {
                   ]))));
 }
 
-class ResponderView extends StatefulWidget {
-  const ResponderView({super.key});
+class ResponderPage extends StatefulWidget {
+  const ResponderPage({super.key});
   @override
-  State<ResponderView> createState() => _ResponderViewState();
+  State<ResponderPage> createState() => _ResponderPageState();
 }
 
-class _ResponderViewState extends State<ResponderView>
-    with AutomaticKeepAliveClientMixin {
-  @override
-  bool get wantKeepAlive => true;
-
+class _ResponderPageState extends State<ResponderPage> {
   StreamSubscription<List<Map<String, dynamic>>>? _sosSubscription;
   final Set<String> _seenAssignmentIds = <String>{};
-  final Set<String> _locallyDismissedIds = <String>{};
   bool _sirenPlaying = false;
   bool _alertDialogShowing = false;
   String _latestAlertTitle = 'New SOS signal received';
@@ -3165,8 +3341,20 @@ class _ResponderViewState extends State<ResponderView>
 
   @override
   Widget build(BuildContext context) {
-    super.build(context);
-    return ListView(
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('AS RESPONDER'),
+        actions: [
+          IconButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ResponderMapPage()),
+            ),
+            icon: const Icon(Icons.map),
+          ),
+        ],
+      ),
+      body: ListView(
         padding: const EdgeInsets.all(18),
         children: <Widget>[
           Container(
@@ -3198,39 +3386,13 @@ class _ResponderViewState extends State<ResponderView>
             ),
           ),
           const SizedBox(height: 18),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'LIVE SOS ALERTS',
-                style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    color: navy,
-                    fontSize: 16,
-                    letterSpacing: .5),
-              ),
-              TextButton.icon(
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.red.shade700,
-                  visualDensity: VisualDensity.compact,
-                ),
-                onPressed: () async {
-                  await highAlertSirenPlayer.stop();
-                  if (mounted) setState(() => _sirenPlaying = false);
-                  setState(() {
-                    _locallyDismissedIds.addAll(_seenAssignmentIds);
-                  });
-                  await SosRepository.instance.clearAllAlerts();
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('All alerts cleared!')),
-                    );
-                  }
-                },
-                icon: const Icon(Icons.delete_sweep, size: 16),
-                label: const Text('Clear All', style: TextStyle(fontSize: 12)),
-              ),
-            ],
+          const Text(
+            'LIVE SOS ALERTS',
+            style: TextStyle(
+                fontWeight: FontWeight.w900,
+                color: navy,
+                fontSize: 16,
+                letterSpacing: .5),
           ),
           const SizedBox(height: 8),
           if (_sirenPlaying) ...[
@@ -3269,21 +3431,13 @@ class _ResponderViewState extends State<ResponderView>
                   ),
                 );
               }
-              final rawRequests = snapshot.data!;
-              for (final r in rawRequests) {
-                final id = (r['emergency_id'] ?? r['id'])?.toString();
-                if (id != null) _seenAssignmentIds.add(id);
-              }
-              final requests = rawRequests
-                  .where((r) => !_locallyDismissedIds.contains(
-                      (r['emergency_id'] ?? r['id'])?.toString()))
-                  .toList();
+              final requests = snapshot.data!;
               if (requests.isEmpty) {
                 return const Card(
                   child: Padding(
                     padding: EdgeInsets.all(20),
                     child: Text(
-                      'No active emergency alerts in your area right now. When someone sends an SOS, it will appear here in real time.',
+                      'No active assigned SOS requests. Only verified responder accounts can see assigned incidents.',
                     ),
                   ),
                 );
@@ -3298,217 +3452,87 @@ class _ResponderViewState extends State<ResponderView>
                   final locationText = lat == null || lng == null
                       ? 'Location unavailable'
                       : 'Location: $lat, $lng';
-                  final isAccepted =
-                      (data['status'] ?? '').toString() == 'accepted' ||
-                          (data['status'] ?? '').toString() == 'responding';
-
                   return Card(
                     color: isHigh ? const Color(0xFF69000B) : null,
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: BorderSide(
-                        color: isAccepted
-                            ? Colors.green
-                            : (isHigh
-                                ? const Color(0xFFFF5968)
-                                : Colors.black12),
-                        width: isAccepted ? 2 : 1,
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: isHigh
+                            ? const Color(0xFFFF5968)
+                            : const Color(0xFFFFE4E9),
+                        child: Icon(
+                          isHigh ? Icons.warning_rounded : Icons.sos,
+                          color: isHigh ? Colors.white : red,
+                        ),
                       ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      title: Text(
+                        '${isHigh ? '🚨 HIGH ALERT — ' : ''}${data['emergency_type'] ?? 'Emergency'}',
+                        style: TextStyle(
+                          color: isHigh ? Colors.white : null,
+                          fontWeight:
+                              isHigh ? FontWeight.w900 : FontWeight.normal,
+                        ),
+                      ),
+                      subtitle: Text(
+                        '${data['category'] ?? 'SOS'} • ${data['status'] ?? 'pending'}\n$locationText\n${data['instructions'] ?? ''}',
+                        style: TextStyle(
+                          color: isHigh ? Colors.white70 : null,
+                        ),
+                      ),
+                      isThreeLine: true,
+                      trailing: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              CircleAvatar(
-                                backgroundColor: isHigh
-                                    ? const Color(0xFFFF5968)
-                                    : (isAccepted
-                                        ? const Color(0xFFE8F8EE)
-                                        : const Color(0xFFFFE4E9)),
-                                child: Icon(
-                                  isAccepted
-                                      ? Icons.check_circle_rounded
-                                      : (isHigh
-                                          ? Icons.warning_rounded
-                                          : Icons.sos),
-                                  color: isAccepted
-                                      ? Colors.green
-                                      : (isHigh ? Colors.white : red),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      '${isHigh ? '🚨 HIGH ALERT — ' : ''}${data['emergency_type'] ?? 'Emergency'}',
-                                      style: TextStyle(
-                                        color: isHigh ? Colors.white : null,
-                                        fontWeight: FontWeight.w900,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      '${data['category'] ?? 'SOS'} • Status: ${(data['status'] ?? 'pending').toString().toUpperCase()}',
-                                      style: TextStyle(
-                                        color: isAccepted
-                                            ? Colors.green
-                                            : (isHigh
-                                                ? Colors.white70
-                                                : Colors.black87),
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      locationText,
-                                      style: TextStyle(
-                                        color: isHigh
-                                            ? Colors.white60
-                                            : Colors.black54,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                    if ((data['instructions'] ?? '')
-                                        .toString()
-                                        .trim()
-                                        .isNotEmpty) ...[
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        data['instructions'],
-                                        style: TextStyle(
-                                          color: isHigh
-                                              ? Colors.white70
-                                              : Colors.black87,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                            ],
+                          FilledButton(
+                            onPressed: () async {
+                              try {
+                                await SosRepository.instance.acceptRequest(id);
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                        content: Text(
+                                            'Acceptance confirmed by server.')),
+                                  );
+                                }
+                              } catch (_) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                        content: Text(
+                                            'Could not accept. Verify responder status or check whether another responder already accepted.')),
+                                  );
+                                }
+                              }
+                            },
+                            child: const Text('ACCEPT'),
                           ),
-                          const SizedBox(height: 12),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              if (isAccepted) ...[
-                                TextButton.icon(
-                                  onPressed: () async {
-                                    try {
-                                      final url = await SosRepository.instance
-                                          .getAcceptedEmergencyAudioUrl(id);
-                                      if (url == null) {
-                                        if (context.mounted) {
-                                          ScaffoldMessenger.of(context)
-                                              .showSnackBar(
-                                            const SnackBar(
-                                                content: Text(
-                                                    'No uploaded voice recording is available yet.')),
-                                          );
-                                        }
-                                        return;
-                                      }
-                                      await emergencyAudioPlayer
-                                          .play(UrlSource(url));
-                                    } catch (_) {
-                                      if (context.mounted) {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          const SnackBar(
-                                              content: Text(
-                                                  'Audio is not available or access was denied.')),
-                                        );
-                                      }
-                                    }
-                                  },
-                                  icon: const Icon(Icons.play_arrow),
-                                  label: const Text('AUDIO'),
-                                ),
-                                const SizedBox(width: 8),
-                                OutlinedButton.icon(
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.green,
-                                    side: const BorderSide(
-                                        color: Colors.green),
-                                  ),
-                                  onPressed: () => Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                        builder: (_) =>
-                                            const ResponderMapPage()),
-                                  ),
-                                  icon: const Icon(
-                                      Icons.navigation_rounded),
-                                  label: const Text('NAVIGATE'),
-                                ),
-                                const SizedBox(width: 8),
-                                FilledButton.icon(
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: Colors.grey.shade800,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  onPressed: () async {
-                                    setState(() => _locallyDismissedIds.add(id));
-                                    await SosRepository.instance
-                                        .resolveRequest(id);
-                                    if (context.mounted) {
+                          if ((data['status'] ?? '').toString() == 'accepted' ||
+                              (data['status'] ?? '').toString() == 'responding')
+                            TextButton.icon(
+                              onPressed: () async {
+                                try {
+                                  final url = await SosRepository.instance
+                                      .getAcceptedEmergencyAudioUrl(id);
+                                  if (url == null) {
+                                    if (context.mounted)
                                       ScaffoldMessenger.of(context)
-                                          .showSnackBar(
+                                          .showSnackBar(const SnackBar(
+                                              content: Text(
+                                                  'No uploaded voice recording is available yet.')));
+                                    return;
+                                  }
+                                  await emergencyAudioPlayer
+                                      .play(UrlSource(url));
+                                } catch (_) {
+                                  if (context.mounted)
+                                    ScaffoldMessenger.of(context).showSnackBar(
                                         const SnackBar(
                                             content: Text(
-                                                'Incident marked as resolved.')),
-                                      );
-                                    }
-                                  },
-                                  icon: const Icon(Icons.done_all, size: 16),
-                                  label: const Text('RESOLVE'),
-                                ),
-                              ] else ...[
-                                FilledButton.icon(
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: isHigh
-                                        ? const Color(0xFFFF5968)
-                                        : const Color(0xFF087F8C),
-                                  ),
-                                  onPressed: () async {
-                                    try {
-                                      await SosRepository.instance
-                                          .acceptRequest(id);
-                                      if (context.mounted) {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          const SnackBar(
-                                              content: Text(
-                                                  'Emergency accepted! You are responding.')),
-                                        );
-                                      }
-                                    } catch (_) {
-                                      if (context.mounted) {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          const SnackBar(
-                                              content: Text(
-                                                  'Could not accept. Check if another responder already accepted.')),
-                                        );
-                                      }
-                                    }
-                                  },
-                                  icon: const Icon(Icons.check),
-                                  label: const Text('ACCEPT SOS'),
-                                ),
-                              ],
-                            ],
-                          ),
+                                                'Audio is not available or access was denied.')));
+                                }
+                              },
+                              icon: const Icon(Icons.play_arrow),
+                              label: const Text('AUDIO'),
+                            ),
                         ],
                       ),
                     ),
@@ -3528,33 +3552,11 @@ class _ResponderViewState extends State<ResponderView>
           ),
           const SizedBox(height: 8),
           const Text(
-            'As an active community responder, accept nearby emergencies to navigate and assist. Audio playback is available if the requester uploaded a voice message.',
+            'Only verified responders assigned by the backend should accept an SOS. Audio playback is available after acceptance when the requester has uploaded a voice recording.',
             style: TextStyle(fontSize: 12, color: Colors.black54),
           ),
         ],
-      );
-  }
-}
-
-class ResponderPage extends StatelessWidget {
-  const ResponderPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('AS RESPONDER'),
-        actions: [
-          IconButton(
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ResponderMapPage()),
-            ),
-            icon: const Icon(Icons.map),
-          ),
-        ],
       ),
-      body: const ResponderView(),
     );
   }
 }
