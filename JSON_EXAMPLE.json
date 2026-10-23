@@ -1,0 +1,19 @@
+{
+  "userId": "demo_user_001",
+  "role": "both",
+  "profile": {
+    "fullName": "Example User",
+    "preferredLanguage": "English",
+    "country": "India"
+  },
+  "contactVerification": {
+    "mobileVerified": false,
+    "emailVerified": false
+  },
+  "responderProfile": {
+    "availability": "unavailable",
+    "declaredSkills": ["first_aid"],
+    "approvalStatus": "pending"
+  },
+  "registrationStatus": "incomplete"
+}
