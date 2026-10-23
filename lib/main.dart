@@ -3816,3 +3816,26 @@ class _ResponderMapPageState extends State<ResponderMapPage> {
     );
   }
 }
+
+/// Bottom navigation indicator used by the service-choice screen.
+class _NavigationPill extends StatelessWidget {
+  const _NavigationPill();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 32,
+      width: double.infinity,
+      child: Center(
+        child: Container(
+          width: 166,
+          height: 5,
+          decoration: BoxDecoration(
+            color: const Color(0xFF64686C),
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+      ),
+    );
+  }
+}
