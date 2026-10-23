@@ -1,0 +1,41 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function verifiedResponder() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/responders/$(request.auth.uid))
+        && get(/databases/$(database)/documents/responders/$(request.auth.uid)).data.verified == true
+        && get(/databases/$(database)/documents/responders/$(request.auth.uid)).data.active == true;
+    }
+
+    // Incident creation and all authoritative state transitions are performed by
+    // trusted Cloud Functions. Clients cannot assign responders or change status.
+    match /sosRequests/{sosId} {
+      allow create, update, delete: if false;
+      allow get: if signedIn() && (
+        resource.data.requesterId == request.auth.uid ||
+        (verifiedResponder() && resource.data.status in ['pending', 'accepted', 'en_route', 'arrived'])
+      );
+      allow list: if signedIn() && (verifiedResponder() || resource.data.requesterId == request.auth.uid);
+    }
+
+    // Private details include exact coordinates, instructions and contact-sensitive preferences.
+    // Only the owner or an assigned responder may read them. Clients cannot write private details.
+    match /sosPrivate/{sosId} {
+      allow get: if signedIn() && (
+        resource.data.requesterId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/sosRequests/$(sosId)) &&
+         request.auth.uid in get(/databases/$(database)/documents/sosRequests/$(sosId)).data.acceptedResponderIds)
+      );
+      allow list, create, update, delete: if false;
+    }
+
+    // Responder records are provisioned and updated only by a trusted admin workflow.
+    match /responders/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

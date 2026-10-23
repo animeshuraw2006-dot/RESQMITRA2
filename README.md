@@ -1,73 +1,41 @@
-# RESQ-MITRA — Flutter Android Starter
+# ResQMitra — Combined Flutter App Source
 
-A structured Flutter project scaffold based on the RESQ-MITRA role-selection, unified registration, permission explainer, help-seeker, and responder screen designs.
+This archive combines the available ResQMitra onboarding, dashboard, SOS selection, emergency request and responder screens into one Flutter project, along with the six supplied screen references.
 
-## Included in this ZIP
+## Screen flow
+1. **Splash** — ResQMitra launch screen.
+2. **Role selection** — choose Help Seeker, Rescuer, or both.
+3. **Create Account** — local form validation and navigation.
+4. **Home dashboard** — large SOS action, High Alert SOS, siren/flashlight preview controls, profile/responder shortcuts, helpline, and Home/Map/History/Badges/Profile navigation.
+5. **Choose Your SOS** — General SOS, Women SOS, Child SOS.
+6. **Emergency category grids** — 12 General categories, 8 Women categories, 8 Child categories.
+7. **Emergency request form** — selected category is passed into the existing form.
+8. **Responder screen** — responder workflow screen.
 
-- Role selection: Help Seeker, As Rescuer, Both
-- Unified multi-step registration form with role-aware sections
-- Contact, address, emergency contact, medical/accessibility, education, skills, availability and identity-document sections
-- Permission explainer for location, notifications, calling, contacts, microphone and camera
-- Demo home screens for help seekers and responders
-- SOS request form and responder request list (demo/local flow)
-- Local JSON profile persistence using SharedPreferences
-- SQLite database service foundation
-- Location, image picker, permission and dialler service foundations
-- GitHub Actions workflow to build and upload an APK artifact
-- Flutter widget test starter
+## Run locally
+1. Install Flutter and a compatible Android toolchain.
+2. Extract the ZIP and open the `ResQMitra_Production_Upgrade` folder.
+3. Run `flutter pub get`.
+4. Run `flutter analyze`.
+5. Run `flutter test` and then `flutter run` on a configured emulator/device.
 
-## Important limitations
+## Important safety and integration notes
+- High Alert countdown starts at **5 seconds** and keeps 5 visible for a full second before decrementing. It currently opens a confirmation flow; it does **not** automatically submit an SOS when the timer reaches zero.
+- Call **112** directly in India for immediate danger. Do not rely on this app as a replacement for emergency services.
+- Siren and flashlight controls are UI preview toggles until hardware plugins and permissions are integrated and tested.
+- SOS delivery, responder notifications, real account authentication, database rules and user identity verification require configured backend services and device testing.
+- Map needs valid API keys/permissions. History, Badges and Profile tabs include UI/navigation placeholders where production data integration remains necessary.
+- Do not commit real API keys, passwords or backend secrets to GitHub.
 
-This is a development starter, not a certified or production-ready emergency service. The SOS and responder matching flows are demo/local UI flows until a trusted backend is configured. A local database cannot deliver requests to other devices.
+## Source layout
+- `lib/main.dart` — splash, role selection, signup flow and app entry point.
+- `lib/screens/home_screen.dart` — home dashboard and High Alert countdown.
+- `lib/screens/sos_selection_screen.dart` — Choose Your SOS and all category grids.
+- `lib/screens/victim_screen.dart` — emergency request form.
+- `lib/screens/responder_screen.dart` — responder screen.
+- `lib/screens/incident_map_screen.dart` — map screen starter.
+- `lib/models/` and `lib/services/` — models and service layer.
+- `assets/reference_designs/` — supplied screenshots for design reference only.
 
-Real SMS/email OTP, identity verification, push notifications, live responder matching, secure document upload, and admin approval require a configured backend/provider. Never use sample verification statuses as proof of identity. Do not store production secrets in the repository.
-
-The app does not automatically grant all permissions. Android permissions are requested in context where implemented. Permission declarations and platform setup may need adjustment based on the final feature set and target Android SDK.
-
-## Create Android platform files (if absent)
-
-Install Flutter stable and Android SDK, then from the project root run:
-
-```bash
-flutter create . --platforms=android
-flutter pub get
-flutter analyze
-flutter test
-flutter run
-```
-
-If `android/` is already present, inspect it before running `flutter create`.
-
-## Build APK locally
-
-```bash
-flutter pub get
-flutter build apk --release
-```
-
-APK output:
-`build/app/outputs/flutter-apk/app-release.apk`
-
-## GitHub APK build
-
-1. Upload/push the project to your repository's `main` branch.
-2. Open **Actions** in GitHub.
-3. Select **Build RESQ-MITRA Android APK**.
-4. Choose **Run workflow** or push a commit.
-5. When the workflow finishes, open the run and download the `RESQ-MITRA-Android-APK` artifact.
-
-The workflow creates Android platform files if missing, installs dependencies, runs formatting/analyzer/tests, builds a release APK and uploads it.
-
-## Suggested next production steps
-
-1. Configure a real authentication provider and OTP verification.
-2. Add a secure backend API and shared database.
-3. Implement server-authoritative SOS lifecycle and responder assignment.
-4. Configure push notifications and delivery monitoring.
-5. Add privacy policy, consent flows, data retention and account deletion.
-6. Test on physical Android devices, including denied permissions, no network, low battery and emergency scenarios.
-7. Set up a protected release-signing process for distribution outside development/testing.
-
-## Assets
-
-Place the official RESQ-MITRA logo in `assets/images/resq_mitra_logo.png`. If no logo is supplied, the app uses a shield icon and text fallback.
+## Verification status
+The ZIP archive was checked for integrity. Flutter analysis, automated tests and APK build have not been run in this environment, so run the commands above before deployment.

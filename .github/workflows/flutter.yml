@@ -1,0 +1,41 @@
+name: RESQ-MITRA Flutter CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  flutter-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Resolve Flutter packages
+        run: flutter pub get
+      - name: Format Dart source
+        run: dart format lib test
+      - name: Analyze Flutter source
+        run: flutter analyze
+      - name: Run Flutter tests
+        run: flutter test
+      - name: Build debug APK
+        run: flutter build apk --debug
+      - name: Build Cloud Functions TypeScript
+        working-directory: functions
+        run: npm ci || npm install
+        # Build runs separately to preserve useful npm error output.
+      - name: Compile Cloud Functions
+        working-directory: functions
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: resq-mitra-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk

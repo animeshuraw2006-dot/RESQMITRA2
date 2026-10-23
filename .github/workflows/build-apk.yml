@@ -1,0 +1,71 @@
+name: Build ResQMitra Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Analyze and build ResQMitra Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Find Flutter project
+        shell: bash
+        run: |
+          set -euo pipefail
+          PUBSPEC_PATH="$(find . -type f -name pubspec.yaml -not -path './.git/*' -not -path '*/.dart_tool/*' -print -quit)"
+          if [ -z "$PUBSPEC_PATH" ]; then
+            echo 'ERROR: pubspec.yaml was not found. Upload the actual Flutter project source, not only this workflow.'
+            exit 1
+          fi
+          FLUTTER_PROJECT_DIR="$(dirname "$PUBSPEC_PATH")"
+          echo "Flutter project found at: $FLUTTER_PROJECT_DIR"
+          echo "FLUTTER_PROJECT_DIR=$FLUTTER_PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FLUTTER_PROJECT_DIR"
+          flutter pub get
+
+      - name: Analyze Dart code
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FLUTTER_PROJECT_DIR"
+          flutter analyze
+
+      - name: Build release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$FLUTTER_PROJECT_DIR"
+          flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: resqmitra-release-apk
+          path: ${{ env.FLUTTER_PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14

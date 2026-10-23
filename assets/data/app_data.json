@@ -1,0 +1,14 @@
+{
+  "appName": "RESQ MITRA",
+  "tagline": ["HELP", "PROTECT", "SUPPORT", "TOGETHER"],
+  "roles": [
+    {"id": "seeker", "title": "HELP SEEKER", "description": "I need help or emergency support", "icon": "volunteer_activism"},
+    {"id": "volunteer", "title": "VOLUNTEER AS RESCUE RESPONDER", "description": "I want to help people in need", "icon": "health_and_safety"}
+  ],
+  "sosTypes": [
+    {"id": "general", "title": "GENERAL SOS", "color": "#1976D2", "description": "Emergency, accident or urgent assistance"},
+    {"id": "women", "title": "WOMEN SOS", "color": "#E94E9B", "description": "Safety support for women"},
+    {"id": "child", "title": "CHILD SOS", "color": "#F5C542", "description": "Safety support for children"}
+  ],
+  "dashboard": ["HOME", "MAP", "HISTORY", "BADGES", "PROFILE"]
+}

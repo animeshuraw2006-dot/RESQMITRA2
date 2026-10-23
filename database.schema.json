@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 2,
+  "collections": {
+    "sosRequests": {
+      "documentId": "Client-generated high-entropy request ID; creation is idempotent through Cloud Function",
+      "fields": {
+        "requesterId": {
+          "type": "string",
+          "required": true,
+          "description": "Firebase Authentication UID"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "General SOS",
+            "Women SOS",
+            "Child SOS",
+            "HIGH ALERT SOS"
+          ],
+          "required": true
+        },
+        "emergencyType": {
+          "type": "string",
+          "required": true
+        },
+        "urgency": {
+          "type": "string",
+          "enum": [
+            "critical",
+            "high",
+            "normal",
+            "high_alert"
+          ],
+          "required": true
+        },
+        "highAlert": {
+          "type": "boolean",
+          "required": true
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "accepted",
+            "en_route",
+            "arrived",
+            "resolved",
+            "cancelled",
+            "safe"
+          ],
+          "required": true
+        },
+        "acceptedResponderIds": {
+          "type": "array",
+          "items": "string",
+          "required": true
+        },
+        "claimedAt": {
+          "type": [
+            "timestamp",
+            "missing"
+          ],
+          "required": false
+        },
+        "createdAt": {
+          "type": "timestamp",
+          "required": true
+        },
+        "updatedAt": {
+          "type": "timestamp",
+          "required": true
+        },
+        "expiresAt": {
+          "type": "timestamp",
+          "required": true
+        },
+        "schemaVersion": {
+          "type": "number",
+          "required": true
+        }
+      },
+      "privacy": "Public queue metadata only. Do not add exact coordinates, free-text instructions, phone numbers, or other sensitive details."
+    },
+    "sosPrivate": {
+      "documentId": "Same ID as matching sosRequests document",
+      "fields": {
+        "requesterId": {
+          "type": "string",
+          "required": true
+        },
+        "instructions": {
+          "type": "string",
+          "maxLength": 2000,
+          "required": true
+        },
+        "doNotCall": {
+          "type": "boolean",
+          "required": true
+        },
+        "bloodGroup": {
+          "type": "string",
+          "enum": [
+            "Any blood group",
+            "A+",
+            "A-",
+            "B+",
+            "B-",
+            "AB+",
+            "AB-",
+            "O+",
+            "O-"
+          ],
+          "required": true
+        },
+        "audioRequested": {
+          "type": "boolean",
+          "required": true,
+          "description": "UI preference only; audio is not recorded or uploaded by this build"
+        },
+        "location": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": true,
+          "properties": {
+            "latitude": {
+              "type": "number"
+            },
+            "longitude": {
+              "type": "number"
+            },
+            "accuracyMeters": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "capturedAt": {
+              "type": "timestamp"
+            }
+          }
+        },
+        "createdAt": {
+          "type": "timestamp",
+          "required": true
+        }
+      },
+      "privacy": "Readable only by incident owner or assigned responder. Writes are restricted to trusted Cloud Functions."
+    },
+    "responders": {
+      "documentId": "Firebase Authentication UID",
+      "fields": {
+        "verified": {
+          "type": "boolean",
+          "required": true
+        },
+        "active": {
+          "type": "boolean",
+          "required": true
+        },
+        "skills": {
+          "type": "array",
+          "items": "string",
+          "required": false
+        }
+      },
+      "privacy": "Provisioned by a trusted admin workflow only. Clients cannot create or update responder records."
+    }
+  }
+}

@@ -1,16 +1,36 @@
+# Flutter / Dart
 .dart_tool/
 .packages
-.pub/
+.pub-cache/
 build/
 .flutter-plugins
 .flutter-plugins-dependencies
-.metadata
+coverage/
+
+# Android / IDE
 .idea/
 .vscode/
 *.iml
-android/local.properties
+local.properties
 android/key.properties
-*.jks
-*.keystore
+android/app/*.jks
+android/app/*.keystore
+
+# Firebase / secrets
 .env
-secrets/
+.env.*
+!.env.example
+service-account*.json
+*-adminsdk-*.json
+google-services.json
+GoogleService-Info.plist
+firebase-debug.log
+ui-debug.log
+
+# Node
+functions/node_modules/
+functions/lib/
+
+# OS
+.DS_Store
+Thumbs.db
