@@ -18,8 +18,15 @@ class NotificationService {
     }
     _messaging.onTokenRefresh.listen((newToken) async {
       final current = FirebaseAuth.instance.currentUser;
-      if (current != null) await FirebaseFirestore.instance.collection('users').doc(current.uid)
-        .set({'fcmToken': newToken, 'fcmTokenUpdatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+      if (current != null) {
+        await FirebaseFirestore.instance.collection('users').doc(current.uid).set(
+          {
+            'fcmToken': newToken,
+            'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+      }
     });
   }
 }
