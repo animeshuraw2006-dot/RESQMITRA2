@@ -1,37 +1,38 @@
 # ResQMitra Flutter starter
 
-A Flutter UI starter based on the supplied 15-page ResQMitra design PDF. Includes the intro video and siren/logo assets supplied with the request.
+Flutter/Dart UI prototype for ResQMitra. Includes the supplied intro video, siren audio, and logo assets, plus a GitHub Actions workflow that generates Android platform scaffolding if needed, runs analysis, builds a release APK, and uploads it as an artifact.
 
-## Run
+## Run locally
 
-1. Install Flutter stable and Android Studio / Xcode as appropriate.
-2. Create platform folders if needed: `flutter create .` (run inside this directory).
-3. Run `flutter pub get`.
-4. Run on a physical device: `flutter run`.
+1. Install Flutter stable and Android Studio.
+2. From this directory run:
 
-## Current screens
+   ```bash
+   flutter create --platforms=android --project-name=resqmitra .
+   flutter pub get
+   flutter analyze
+   flutter run
+   ```
 
-- 6–8 second intro video with skip/continue
-- Role selection, login, and vertically scrolling registration forms for Help Seeker, Rescuer, and Both
-- Permission request screen
-- Home dashboard with SOS categories, High Alert, flashlight, siren, online/offline state, responders and helplines
-- General / Women / Child SOS categories and confirm-emergency form
-- Five-second High Alert countdown with cancel button
-- Responder dashboard/map placeholder and appreciation/badge screen
-- Emergency helpline dial links
+## Build on GitHub
 
-## Important integration notes
+Commit the project files, including `.github/workflows/build-apk.yml`, to your repository's `master` or `main` branch. Open **Actions**, select **Build ResQMitra APK**, and download the `ResQMitra-APK` artifact from a successful run.
 
-This is a UI prototype, not yet a production emergency dispatch system. SMS links open the phone's messaging app for user confirmation; the app does not silently send SMS. Live responder matching, push notifications, backend storage, and real-time maps need a backend and a Maps SDK/API key. Voice recording and camera controls are represented in the confirmation UI and need capture/upload implementation. Verify emergency numbers and permission policies for the launch region before release.
+## Screens included in this prototype
 
-### Android permissions
+- Intro video and role selection
+- Login and vertically arranged Help Seeker / Rescuer / Both registration forms with a final submit button
+- Permission explanation and request screen
+- Home dashboard with SOS, High Alert, flashlight, siren, online/offline toggle, responders and helplines
+- General SOS, Women SOS and Child SOS categories
+- Emergency confirmation form with description, location lookup, SMS composer option, voice/photo UI toggles and Do Not Call checkbox
+- Five-second High Alert countdown and cancel action
+- Responder dashboard/map placeholder, appreciation and badge selection
 
-When platform folders are generated, review `android/app/src/main/AndroidManifest.xml` and add only the permissions needed for your release, such as `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`, `CAMERA`, `RECORD_AUDIO`, `POST_NOTIFICATIONS`, and `CALL_PHONE` (only if directly placing calls). Background location, SMS permissions, and automatic SMS sending have additional Play policy and runtime restrictions; do not request them unless justified and approved.
+## Important limitations
 
-### Before launch
+This is an initial UI prototype, not a production-ready emergency dispatch service and not a pixel-perfect reproduction of every PDF screen. The current responder map is a placeholder; live responder matching, push notifications, backend persistence, real-time maps, voice recording and camera capture/upload need implementation. SMS opens the messaging app for user confirmation; the app does not silently send SMS. The app must be tested on real Android devices, and platform permissions and emergency numbers must be verified before release.
 
-- Add a secure API/backend for accounts, verified contacts, responder availability, SOS creation and status updates.
-- Implement authenticated push notifications and server-side responder matching.
-- Integrate Google Maps or another map provider and handle location permission denial gracefully.
-- Test High Alert cancellation, duplicate prevention, network failure, battery saver, and device-specific flashlight/audio behavior.
-- Add privacy policy, consent, data retention rules, and a clearly tested emergency escalation flow.
+## Android permissions and release
+
+Review `android/app/src/main/AndroidManifest.xml` after scaffolding. Request only permissions justified by implemented features. Background location and automatic SMS sending have additional platform and Play policy restrictions. Configure signing credentials securely through GitHub Secrets before publishing a store-ready release.
