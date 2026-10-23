@@ -36,3 +36,8 @@ This is an initial UI prototype, not a production-ready emergency dispatch servi
 ## Android permissions and release
 
 Review `android/app/src/main/AndroidManifest.xml` after scaffolding. Request only permissions justified by implemented features. Background location and automatic SMS sending have additional platform and Play policy restrictions. Configure signing credentials securely through GitHub Secrets before publishing a store-ready release.
+
+
+## GitHub Actions APK build troubleshooting
+
+The Flutter project root must be the repository root: `pubspec.yaml`, `lib/`, `test/`, `assets/`, and `.github/` should be directly inside the repository, not nested one extra level inside `resqmitra_flutter/`. The workflow checks for `android/app/build.gradle` (or `build.gradle.kts`) and generates Android platform files if they are missing. After extracting this ZIP, upload the *contents* of `resqmitra_flutter/` to the repository root.
