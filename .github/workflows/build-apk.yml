@@ -2,7 +2,7 @@ name: Build ResQMitra APK
 
 on:
   push:
-    branches: [master, main]
+    branches: [main, master]
   workflow_dispatch:
 
 permissions:
@@ -27,14 +27,18 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Ensure Android platform files exist
-        shell: bash
+      - name: Verify required assets
+        run: |
+          test -f assets/video/resqmitra_intro.mp4
+          test -f assets/audio/siren.ogg
+          test -f assets/images/resqmitra_logo.jpeg
+          test -f pubspec.yaml
+          test -f lib/main.dart
+
+      - name: Generate Android platform files if missing
         run: |
           if [ ! -f android/app/build.gradle ] && [ ! -f android/app/build.gradle.kts ]; then
-            echo "Android Gradle files are missing; generating the Android platform project."
-            flutter create --platforms=android --project-name=resqmitra --overwrite .
-          else
-            echo "Android Gradle files already exist."
+            flutter create --platforms=android --project-name=resqmitra .
           fi
 
       - name: Install dependencies
@@ -42,6 +46,9 @@ jobs:
 
       - name: Analyze Dart source
         run: flutter analyze
+
+      - name: Run widget tests
+        run: flutter test
 
       - name: Build release APK
         run: flutter build apk --release

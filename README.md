@@ -1,43 +1,59 @@
-# ResQMitra Flutter starter
+# ResQMitra — Flutter Android starter
 
-Flutter/Dart UI prototype for ResQMitra. Includes the supplied intro video, siren audio, and logo assets, plus a GitHub Actions workflow that generates Android platform scaffolding if needed, runs analysis, builds a release APK, and uploads it as an artifact.
+ResQMitra is a first-responder app prototype. This repository includes the supplied brand media and a GitHub Actions workflow for building a release APK.
 
-## Run locally
+## Assets included
 
-1. Install Flutter stable and Android Studio.
-2. From this directory run:
+```text
+assets/
+├── audio/
+│   └── siren.ogg                 # supplied emergency siren
+├── images/
+│   └── resqmitra_logo.jpeg       # supplied ResQMitra logo
+└── video/
+    └── resqmitra_intro.mp4       # supplied intro video
+```
 
-   ```bash
-   flutter create --platforms=android --project-name=resqmitra .
-   flutter pub get
-   flutter analyze
-   flutter run
-   ```
+All three supplied assets are declared in `pubspec.yaml` and referenced by `lib/main.dart`. Keep the paths and case exactly the same (GitHub builds on Linux, where paths are case-sensitive).
 
 ## Build on GitHub
 
-Commit the project files, including `.github/workflows/build-apk.yml`, to your repository's `master` or `main` branch. Open **Actions**, select **Build ResQMitra APK**, and download the `ResQMitra-APK` artifact from a successful run.
+1. Upload the **contents** of this folder to the root of your GitHub repository (so `pubspec.yaml`, `lib/`, `assets/`, `test/`, and `.github/` are at the repository root).
+2. Commit and push to `main` or `master`, or run the workflow manually from the Actions tab.
+3. Download the `ResQMitra-APK` artifact from the successful workflow run.
 
-## Screens included in this prototype
+The workflow generates Android platform scaffolding if needed, installs dependencies, runs `flutter analyze`, runs widget tests, builds a release APK, and uploads it as an artifact.
 
-- Intro video and role selection
-- Login and vertically arranged Help Seeker / Rescuer / Both registration forms with a final submit button
-- Permission explanation and request screen
-- Home dashboard with SOS, High Alert, flashlight, siren, online/offline toggle, responders and helplines
-- General SOS, Women SOS and Child SOS categories
-- Emergency confirmation form with description, location lookup, SMS composer option, voice/photo UI toggles and Do Not Call checkbox
-- Five-second High Alert countdown and cancel action
-- Responder dashboard/map placeholder, appreciation and badge selection
+## Local commands
 
-## Important limitations
+```bash
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk --release
+```
 
-This is an initial UI prototype, not a production-ready emergency dispatch service and not a pixel-perfect reproduction of every PDF screen. The current responder map is a placeholder; live responder matching, push notifications, backend persistence, real-time maps, voice recording and camera capture/upload need implementation. SMS opens the messaging app for user confirmation; the app does not silently send SMS. The app must be tested on real Android devices, and platform permissions and emergency numbers must be verified before release.
+## What the prototype currently does
 
-## Android permissions and release
+- Intro video and branded role selection
+- Login and vertically arranged registration forms for Help Seeker, Rescuer, and Both
+- Permission request screen
+- SOS categories for General, Women, and Child emergencies
+- High Alert five-second countdown with cancellation
+- Emergency details and a Google Maps location link prepared for SMS confirmation
+- Device flashlight toggle (supported devices only) and siren audio playback
+- Emergency helpline list with phone-app launch
+- Responder dashboard UI and appreciation/feedback UI
 
-Review `android/app/src/main/AndroidManifest.xml` after scaffolding. Request only permissions justified by implemented features. Background location and automatic SMS sending have additional platform and Play policy restrictions. Configure signing credentials securely through GitHub Secrets before publishing a store-ready release.
+## Important limitations before real-world emergency use
+
+This is a UI prototype, not a live dispatch system. Emergency SMS is prepared for the user to review and send; it is not silently delivered. Real responder matching, backend data storage, push notifications, authenticated accounts, live map tracking, actual voice recording/photo capture, and audited emergency delivery still need implementation and testing. Do not rely on this prototype as the only way to request emergency help. For an immediate emergency, use your local emergency number.
+
+## Android permissions
+
+Review the generated `android/app/src/main/AndroidManifest.xml` and add only the permissions required by features you actually enable. Test permission denial and devices without flash/location support. Do not request or use SMS/contacts permissions unnecessarily.
 
 
-## GitHub Actions APK build troubleshooting
+## Stage 1 backend integration foundation
 
-The Flutter project root must be the repository root: `pubspec.yaml`, `lib/`, `test/`, `assets/`, and `.github/` should be directly inside the repository, not nested one extra level inside `resqmitra_flutter/`. The workflow checks for `android/app/build.gradle` (or `build.gradle.kts`) and generates Android platform files if they are missing. After extracting this ZIP, upload the *contents* of `resqmitra_flutter/` to the repository root.
+Read [BACKEND_SETUP.md](BACKEND_SETUP.md) before enabling any live services. This project now includes Firebase Auth/Firestore/FCM service classes, Firestore rules, Cloud Functions alert fan-out, live GPS publishing, and encrypted local emergency-contact storage. Firebase remains disabled until you configure your own project. The existing responder map is still a placeholder; wire `google_maps_flutter` with a restricted API key and live data before treating it as a live map.

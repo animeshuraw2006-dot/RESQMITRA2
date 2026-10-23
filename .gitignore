@@ -7,3 +7,11 @@ build/
 .idea/
 .vscode/
 *.iml
+
+# Firebase credentials / local secrets
+google-services.json
+.GoogleService-Info.plist
+.firebaserc
+functions/node_modules/
+functions/lib/
+.env
