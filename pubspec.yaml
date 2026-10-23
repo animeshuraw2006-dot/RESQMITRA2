@@ -1,0 +1,26 @@
+name: resqmitra
+description: ResQMitra first responder application prototype
+publish_to: 'none'
+version: 1.0.0+1
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  video_player: ^2.9.2
+  audioplayers: ^6.1.0
+  url_launcher: ^6.3.1
+  geolocator: ^13.0.2
+  permission_handler: ^11.3.1
+  torch_light: ^1.1.0
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/intro.mp4
+    - assets/siren.ogg
+    - assets/resqmitra_logo.jpeg
