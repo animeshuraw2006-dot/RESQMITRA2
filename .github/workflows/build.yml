@@ -35,26 +35,6 @@ jobs:
 
       - run: flutter pub get
 
-      # The another_telephony plugin compiles Java for 11 but defaults Kotlin to 1.8.
-      # Align its Kotlin bytecode target with Java to prevent Gradle JVM target validation failure.
-      - name: Align another_telephony JVM targets
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          cache = Path.home() / ".pub-cache"
-          candidates = list(cache.glob("hosted/pub.dev/another_telephony-*/android/build.gradle"))
-          candidates += list(cache.glob("hosted/pub.dartlang.org/another_telephony-*/android/build.gradle"))
-          if not candidates:
-              raise SystemExit("Could not find another_telephony Android Gradle file in pub cache")
-          for gradle_file in candidates:
-              content = gradle_file.read_text()
-              marker = "// RESQMITRA JVM target fix"
-              if marker not in content:
-                  content += "\n\n" + marker + "\ntasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {\n    kotlinOptions { jvmTarget = '11' }\n}\n"
-                  gradle_file.write_text(content)
-              print("Patched", gradle_file)
-
       - name: Native launch screen (first video frame)
         continue-on-error: true
         run: dart run flutter_native_splash:create

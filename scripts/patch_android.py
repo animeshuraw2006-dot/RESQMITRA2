@@ -33,3 +33,12 @@ for name in ('build.gradle.kts', 'build.gradle'):
         g.write_text(t)
         print('patched', g)
 print('manifest patched')
+
+# Some plugins (e.g. another_telephony) compile Java as 11 but Kotlin as 1.8, which
+# Kotlin 1.9+/2.x rejects. Downgrade that check from an error to a warning.
+gp = pathlib.Path('android/gradle.properties')
+gtxt = gp.read_text() if gp.exists() else ''
+if 'kotlin.jvm.target.validation.mode' not in gtxt:
+    gtxt = gtxt.rstrip('\n') + '\nkotlin.jvm.target.validation.mode=warning\n'
+    gp.write_text(gtxt)
+print('gradle.properties patched')
