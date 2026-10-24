@@ -114,7 +114,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     margin: const EdgeInsets.only(top: 10),
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
                     decoration: BoxDecoration(
-                        color: (on ? C.ok : C.grey).withOpacity(.1),
+                        color: (on ? C.ok : C.grey).withValues(alpha: .1),
                         borderRadius: BorderRadius.circular(30),
                         border: Border.all(color: on ? C.ok : C.grey)),
                     child: Row(children: [
@@ -123,7 +123,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Expanded(
                           child: Text(on ? 'ONLINE – ready to respond to alerts' : 'OFFLINE – no responder alerts',
                               style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: on ? C.ok : C.grey))),
-                      Switch(value: on, activeColor: C.ok, onChanged: AppState.I.setOnline),
+                      Switch(value: on, activeThumbColor: C.ok, onChanged: AppState.I.setOnline),
                     ]),
                   ),
                 ),

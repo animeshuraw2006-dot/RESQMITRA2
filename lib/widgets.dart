@@ -227,7 +227,7 @@ class OkChip extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 14),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
-            color: (ok ? C.ok : C.warn).withOpacity(.12), borderRadius: BorderRadius.circular(8)),
+            color: (ok ? C.ok : C.warn).withValues(alpha: .12), borderRadius: BorderRadius.circular(8)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(ok ? Icons.check_circle : Icons.schedule, size: 18, color: ok ? C.ok : C.warn),
           const SizedBox(width: 6),
@@ -460,7 +460,7 @@ class _PulsingSosButtonState extends State<PulsingSosButton> with SingleTickerPr
                         stops: [0, .5, 1]),
                     boxShadow: [
                       BoxShadow(
-                          color: const Color(0xFFFF1A1A).withOpacity(.40 + .30 * b),
+                          color: const Color(0xFFFF1A1A).withValues(alpha: .40 + .30 * b),
                           blurRadius: 28 + 34 * b,
                           spreadRadius: 3 + 11 * b),
                     ],
@@ -471,7 +471,7 @@ class _PulsingSosButtonState extends State<PulsingSosButton> with SingleTickerPr
                     height: btn * .90,
                     decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white.withOpacity(.30), width: 3)),
+                        border: Border.all(color: Colors.white.withValues(alpha: .30), width: 3)),
                     alignment: Alignment.center,
                     child: Text('SOS',
                         style: TextStyle(
@@ -479,7 +479,7 @@ class _PulsingSosButtonState extends State<PulsingSosButton> with SingleTickerPr
                             fontSize: btn * .30,
                             fontWeight: FontWeight.w900,
                             letterSpacing: 2,
-                            shadows: [Shadow(color: Colors.black.withOpacity(.25), blurRadius: 8, offset: const Offset(0, 3))])),
+                            shadows: [Shadow(color: Colors.black.withValues(alpha: .25), blurRadius: 8, offset: const Offset(0, 3))])),
                   ),
                 ),
               ),
@@ -501,14 +501,14 @@ class _SignalRings extends CustomPainter {
       final p = (t + i / 3) % 1.0;
       final r = base / 2 * (1.0 + .42 * p);
       final fade = (1 - p);
-      c.drawCircle(ctr, r, Paint()..color = const Color(0xFFFF1A1A).withOpacity(.10 * fade));
+      c.drawCircle(ctr, r, Paint()..color = const Color(0xFFFF1A1A).withValues(alpha: .10 * fade));
       c.drawCircle(
           ctr,
           r,
           Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 3
-            ..color = const Color(0xFFFF2A2A).withOpacity(.55 * fade));
+            ..color = const Color(0xFFFF2A2A).withValues(alpha: .55 * fade));
     }
   }
 

@@ -1,5 +1,5 @@
 name: resqmitra
-description: "ResQMitra - Be the first to respond."
+description: ResQMitra - Be the first to respond.
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -24,13 +24,6 @@ dependencies:
   latlong2: ^0.9.1
   wakelock_plus: ^1.2.8
   another_telephony: ^0.4.1
-  # Firebase packages required by the existing auth, emergency, location,
-  # and notification service files in the reported analyzer output.
-  firebase_core: ^3.15.2
-  firebase_auth: ^5.7.0
-  cloud_firestore: ^5.6.12
-  firebase_messaging: ^15.2.10
-  flutter_secure_storage: ^9.2.4
 
 dev_dependencies:
   flutter_test:

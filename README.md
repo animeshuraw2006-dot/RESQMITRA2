@@ -64,18 +64,3 @@ Registration image/document previews use selected file bytes (`XFile.readAsBytes
   video frame is shown as a still while the video loads. To also remove the *native* white launch screen run once:
   `dart run flutter_native_splash:create` (config is at the bottom of pubspec.yaml).
 * On Flutter **web** the intro plays muted (browsers block autoplay with sound).
-
-## Build APK using GitHub Actions
-
-This project includes `.github/workflows/flutter.yaml`. Upload the **contents of
-the `resqmitra` folder** to the root of your GitHub repository, so `.github`,
-`lib`, `assets`, and `pubspec.yaml` appear directly at the repository root.
-Push to `main` or `master`, or open **Actions → Build RESQ-MITRA APK → Run
-workflow** to start a build manually. If the Android platform folder is missing,
-the workflow generates it before building. When the run succeeds, download the
-`resqmitra-release-apk` artifact from the run's **Artifacts** section.
-
-The workflow runs `flutter analyze` for diagnostics but does not stop on
-analysis findings; APK compilation must still succeed for the artifact to be
-uploaded. The generated APK has not been verified until a GitHub Actions run
-completes successfully.

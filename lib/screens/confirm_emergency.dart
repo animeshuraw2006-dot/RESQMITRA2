@@ -170,7 +170,7 @@ class _ConfirmEmergencyScreenState extends State<ConfirmEmergencyScreen> {
                 _card(Row(children: [
                   widget.image != null
                       ? ClipRRect(borderRadius: BorderRadius.circular(18), child: Image.asset(widget.image!, width: 76, height: 76, fit: BoxFit.cover))
-                      : CircleAvatar(radius: 34, backgroundColor: widget.color.withOpacity(.15), child: Icon(widget.icon, size: 38, color: widget.color)),
+                      : CircleAvatar(radius: 34, backgroundColor: widget.color.withValues(alpha: .15), child: Icon(widget.icon, size: 38, color: widget.color)),
                   const SizedBox(width: 14),
                   Expanded(
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

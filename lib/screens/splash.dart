@@ -36,7 +36,10 @@ class _SplashScreenState extends State<SplashScreen> {
         await _v.play();
       } catch (_) {}
       _v.addListener(_watch);
-    }).catchError((_) => _next());
+    }).catchError((Object _) {
+      _next();
+      return null;
+    });
     _failsafe = Timer(const Duration(seconds: 11), _next);
   }
 

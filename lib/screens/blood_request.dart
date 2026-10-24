@@ -76,7 +76,7 @@ class _BloodRequestScreenState extends State<BloodRequestScreen> {
               color: sel ? color : Colors.white,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: sel ? color : C.border, width: 2),
-              boxShadow: sel ? [BoxShadow(color: color.withOpacity(.35), blurRadius: 14, offset: const Offset(0, 6))] : []),
+              boxShadow: sel ? [BoxShadow(color: color.withValues(alpha: .35), blurRadius: 14, offset: const Offset(0, 6))] : []),
           child: Column(children: [
             Icon(icon, size: 30, color: sel ? Colors.white : color),
             const SizedBox(height: 4),
@@ -158,7 +158,7 @@ class _BloodRequestScreenState extends State<BloodRequestScreen> {
                         child: Container(
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
-                              color: const Color(0xFFFFF1F1), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.red.withOpacity(.5))),
+                              color: const Color(0xFFFFF1F1), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.red.withValues(alpha: .5))),
                           child: Column(children: [
                             const Icon(Icons.info_rounded, color: Colors.red, size: 40),
                             const SizedBox(height: 8),
