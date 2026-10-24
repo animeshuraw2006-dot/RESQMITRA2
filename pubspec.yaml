@@ -1,0 +1,52 @@
+name: resqmitra
+description: ResQMitra - Be the first to respond.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  video_player: ^2.9.1
+  audioplayers: ^6.1.0
+  torch_light: ^1.1.0
+  geolocator: ^13.0.1
+  geocoding: ^3.0.0
+  permission_handler: ^11.3.1
+  url_launcher: ^6.3.0
+  image_picker: ^1.1.2
+  record: ^5.1.2
+  path_provider: ^2.1.4
+  shared_preferences: ^2.3.2
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  wakelock_plus: ^1.2.8
+  another_telephony: ^0.4.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  flutter_native_splash: ^2.4.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
+    - assets/ui/
+    - assets/splash/
+
+# Native (pre-Flutter) launch screen = first frame of the intro video, full screen,
+# so nothing blank shows between tapping the icon and the video.
+# Generate with:  dart run flutter_native_splash:create
+flutter_native_splash:
+  color: "#FFFFFF"
+  image: assets/splash/first_frame.png
+  fullscreen: true
+  android_gravity: fill
+  ios_content_mode: scaleAspectFill
+  web_image_mode: cover
+  android_12:
+    color: "#FFFFFF"
