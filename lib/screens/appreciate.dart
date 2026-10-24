@@ -43,7 +43,7 @@ class _AppreciateBodyState extends State<AppreciateBody> {
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFE3EAF8))),
           child: Row(children: [
-            CircleAvatar(radius: 30, backgroundColor: c.withValues(alpha: .12), child: Icon(i, color: c, size: 32)),
+            CircleAvatar(radius: 30, backgroundColor: c.withOpacity(.12), child: Icon(i, color: c, size: 32)),
             const SizedBox(width: 14),
             Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

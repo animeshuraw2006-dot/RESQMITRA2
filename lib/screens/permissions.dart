@@ -119,8 +119,8 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
             decoration: BoxDecoration(
               color: bg,
               borderRadius: BorderRadius.circular(w * .06),
-              border: Border.all(color: done ? const Color(0xFF1FB45A) : Colors.white.withValues(alpha: .7), width: done ? 1.6 : 1),
-              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .06), blurRadius: 10, offset: const Offset(0, 4))],
+              border: Border.all(color: done ? const Color(0xFF1FB45A) : Colors.white.withOpacity(.7), width: done ? 1.6 : 1),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(.06), blurRadius: 10, offset: const Offset(0, 4))],
             ),
             child: Row(children: [
               Padding(
@@ -208,7 +208,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
                     decoration: BoxDecoration(
                       color: const Color(0xFF0C7FE9),
                       borderRadius: BorderRadius.circular(30),
-                      boxShadow: [BoxShadow(color: const Color(0xFF0C7FE9).withValues(alpha: .4), blurRadius: 16, offset: const Offset(0, 7))],
+                      boxShadow: [BoxShadow(color: const Color(0xFF0C7FE9).withOpacity(.4), blurRadius: 16, offset: const Offset(0, 7))],
                     ),
                     child: _running
                         ? const SizedBox(width: 26, height: 26, child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white))
@@ -249,7 +249,7 @@ class _WavePainter extends CustomPainter {
       ..lineTo(s.width, s.height)
       ..lineTo(0, s.height)
       ..close();
-    c.drawPath(p1, Paint()..color = const Color(0xFFCFE6FB).withValues(alpha: .55));
+    c.drawPath(p1, Paint()..color = const Color(0xFFCFE6FB).withOpacity(.55));
     final p2 = Path()
       ..moveTo(0, s.height * .8)
       ..quadraticBezierTo(s.width * .3, s.height * .45, s.width * .6, s.height * .8)
@@ -257,7 +257,7 @@ class _WavePainter extends CustomPainter {
       ..lineTo(s.width, s.height)
       ..lineTo(0, s.height)
       ..close();
-    c.drawPath(p2, Paint()..color = const Color(0xFFBBDCF8).withValues(alpha: .5));
+    c.drawPath(p2, Paint()..color = const Color(0xFFBBDCF8).withOpacity(.5));
   }
 
   @override

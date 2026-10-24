@@ -68,12 +68,10 @@ class _HighAlertScreenState extends State<HighAlertScreen> with SingleTickerProv
     AlertService.I.dispatch(s);
     SmsService.toContacts(s.smsText);
     HapticFeedback.vibrate();
-    if (mounted) {
-      setState(() {
-        _sent = true;
-        _sos = s;
-      });
-    }
+    if (mounted) setState(() {
+      _sent = true;
+      _sos = s;
+    });
   }
 
   void _cancel() {
@@ -152,7 +150,7 @@ class _HighAlertScreenState extends State<HighAlertScreen> with SingleTickerProv
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.red.withValues(alpha: .4))),
+                    decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.red.withOpacity(.4))),
                     child: Row(children: [
                       _stat(Icons.location_on, 'Location', _sent ? 'Shared' : 'Sharing…'),
                       _stat(Icons.sms, 'SMS', _sent ? 'Sent' : 'Sending…'),
@@ -191,7 +189,7 @@ class _Ring extends CustomPainter {
   @override
   void paint(Canvas c, Size s) {
     final r = Rect.fromCircle(center: s.center(Offset.zero), radius: s.width / 2 - 14);
-    c.drawArc(r, 0, math.pi * 2, false, Paint()..style = PaintingStyle.stroke..strokeWidth = 14..color = Colors.red.withValues(alpha: .18));
+    c.drawArc(r, 0, math.pi * 2, false, Paint()..style = PaintingStyle.stroke..strokeWidth = 14..color = Colors.red.withOpacity(.18));
     c.drawArc(r, -math.pi / 2, math.pi * 2 * progress, false,
         Paint()..style = PaintingStyle.stroke..strokeWidth = 14..strokeCap = StrokeCap.round..color = Colors.red
           ..maskFilter = MaskFilter.blur(BlurStyle.solid, 4 + 8 * glow));

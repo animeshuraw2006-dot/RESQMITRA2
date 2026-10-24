@@ -39,14 +39,14 @@ class ChooseSosScreen extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(24 * s),
             gradient: LinearGradient(colors: grad, begin: Alignment.centerLeft, end: Alignment.centerRight),
-            boxShadow: [BoxShadow(color: grad.first.withValues(alpha: .35), blurRadius: 18, offset: const Offset(0, 8))],
+            boxShadow: [BoxShadow(color: grad.first.withOpacity(.35), blurRadius: 18, offset: const Offset(0, 8))],
           ),
           child: Row(children: [
             ClipRRect(
                 borderRadius: BorderRadius.circular(20 * s),
                 child: Image.asset(tile, width: 82 * s, height: 82 * s, fit: BoxFit.cover)),
             SizedBox(width: 12 * s),
-            Container(width: 1.4, height: 86 * s, color: text.withValues(alpha: .55)),
+            Container(width: 1.4, height: 86 * s, color: text.withOpacity(.55)),
             SizedBox(width: 14 * s),
             Expanded(
                 child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -215,7 +215,7 @@ class _OptionCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: bg,
             borderRadius: BorderRadius.circular(w * .05),
-            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .07), blurRadius: 10, offset: const Offset(0, 4))],
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(.07), blurRadius: 10, offset: const Offset(0, 4))],
           ),
           child: Stack(children: [
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

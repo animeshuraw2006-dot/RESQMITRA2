@@ -1,3 +1,20 @@
+# ResQMitra – build on GitHub (no Flutter install needed)
+
+1. Create a new **empty repository** on GitHub.
+2. Unzip this package and upload **all files and folders** (including the hidden `.github` folder) to the repo root,
+   or push them with git.
+3. Open the repo → **Actions** tab → **Build ResQMitra** → it runs automatically on every push
+   (or press **Run workflow**).
+4. When the run turns green, open it and download **ResQMitra-apk** under *Artifacts*. Unzip it and install
+   `app-release.apk` on your Android phone (allow "install unknown apps").
+5. The optional **ResQMitra-web** artifact is a web build; it may fail because torch/SMS plugins are mobile-only –
+   that does not affect the APK.
+
+The workflow generates the `android/` folder itself and adds the permissions (see `scripts/patch_android.py`).
+If a build fails, open the failed step and send me the red error text.
+
+---
+
 # ResQMitra – Flutter app
 
 ## 1. Create platform folders (once)

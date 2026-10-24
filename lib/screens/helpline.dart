@@ -33,7 +33,7 @@ class HelplineScreen extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: C.cyan)),
               child: Row(children: [
-                CircleAvatar(backgroundColor: color.withValues(alpha: .12), child: Icon(icon, color: color)),
+                CircleAvatar(backgroundColor: color.withOpacity(.12), child: Icon(icon, color: color)),
                 const SizedBox(width: 12),
                 Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
