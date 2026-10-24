@@ -42,7 +42,6 @@ if 'kotlin.jvm.target.validation.mode' not in gtxt:
     gtxt = gtxt.rstrip('\n') + '\nkotlin.jvm.target.validation.mode=warning\n'
     gp.write_text(gtxt)
 print('gradle.properties patched')
-<<<<<<< HEAD
 
 # Some plugins (e.g. geocoding_android) are hard-coded to compileSdk 33, but the AndroidX
 # libraries they pull in need compileSdk 34+. Raise compileSdk on every plugin subproject.
@@ -98,5 +97,3 @@ subprojects {
         done = True
 if not done:
     print('WARNING: no root android build file found')
-=======
->>>>>>> 8629397fb3958ce170e45eedc0873e879db32ec8
