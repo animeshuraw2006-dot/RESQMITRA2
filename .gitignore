@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Miscellaneous
 *.class
 *.log
@@ -46,3 +47,22 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+=======
+.dart_tool/
+.packages
+.pub-cache/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.idea/
+.vscode/
+*.iml
+
+# Firebase credentials / local secrets
+google-services.json
+.GoogleService-Info.plist
+.firebaserc
+functions/node_modules/
+functions/lib/
+.env
+>>>>>>> 877370ad3b201efdafbfd3a911c903f2f86f87e4

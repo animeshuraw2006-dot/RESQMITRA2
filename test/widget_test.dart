@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 // This is a basic Flutter widget test.
 //
 // To perform an interaction with a widget in your test, use the WidgetTester
@@ -26,5 +27,13 @@ void main() {
     // Verify that our counter has incremented.
     expect(find.text('0'), findsNothing);
     expect(find.text('1'), findsOneWidget);
+=======
+import 'package:flutter_test/flutter_test.dart';
+import 'package:resqmitra/main.dart';
+
+void main() {
+  test('ResQMitra app widget can be constructed', () {
+    expect(const ResQMitraApp(), isA<ResQMitraApp>());
+>>>>>>> 877370ad3b201efdafbfd3a911c903f2f86f87e4
   });
 }
