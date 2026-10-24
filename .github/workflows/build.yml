@@ -1,0 +1,68 @@
+name: Build ResQMitra
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:   # lets you press "Run workflow" manually
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # The repo only contains lib/, assets/ and pubspec.yaml – generate the
+      # android/ folder here, then add the permissions the app needs.
+      - name: Generate Android platform folder
+        run: |
+          flutter create --org com.resqmitra --project-name resqmitra --platforms=android .
+          rm -rf test
+
+      - name: Add permissions + minSdk
+        run: python3 scripts/patch_android.py
+
+      - run: flutter pub get
+
+      - name: Native launch screen (first video frame)
+        continue-on-error: true
+        run: dart run flutter_native_splash:create
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ResQMitra-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+  web:
+    name: Web build (optional)
+    runs-on: ubuntu-latest
+    continue-on-error: true   # some plugins (torch, SMS) are mobile-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: |
+          flutter create --org com.resqmitra --project-name resqmitra --platforms=web .
+          rm -rf test
+      - run: flutter pub get
+      - run: flutter build web --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ResQMitra-web
+          path: build/web
