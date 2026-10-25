@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'nav.dart';
+import 'root_overlay.dart';
 import 'theme.dart';
 import 'screens/splash.dart';
 
@@ -18,6 +20,9 @@ class ResQMitraApp extends StatelessWidget {
         title: 'ResQMitra',
         debugShowCheckedModeBanner: false,
         theme: appTheme(),
+        navigatorKey: navKey,
+        navigatorObservers: [AppNav.I],
+        builder: (context, child) => RootOverlay(child: child ?? const SizedBox.shrink()),
         home: const SplashScreen(),
       );
 }

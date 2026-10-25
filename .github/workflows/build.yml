@@ -41,6 +41,9 @@ jobs:
 
       - run: flutter pub get
 
+      - name: Generate app launcher icon
+        run: dart run flutter_launcher_icons
+
       - name: Native launch screen (first video frame)
         continue-on-error: true
         run: dart run flutter_native_splash:create
@@ -52,23 +55,3 @@ jobs:
         with:
           name: ResQMitra-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-
-  web:
-    name: Web build (optional)
-    runs-on: ubuntu-latest
-    continue-on-error: true   # some plugins (torch, SMS) are mobile-only
-    steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-      - run: |
-          flutter create --org com.resqmitra --project-name resqmitra --platforms=web .
-          rm -rf test
-      - run: flutter pub get
-      - run: flutter build web --release
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ResQMitra-web
-          path: build/web

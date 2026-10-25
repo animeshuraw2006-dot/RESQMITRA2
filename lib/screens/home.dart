@@ -1,6 +1,6 @@
-import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import '../nav.dart';
 import '../services.dart';
 import '../state.dart';
 import '../theme.dart';
@@ -19,39 +19,12 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  StreamSubscription<Sos>? _sub;
-
   @override
   void initState() {
     super.initState();
-    // Responders who are ONLINE hear the siren + see a banner for new alerts.
-    _sub = AlertService.I.stream.listen((s) {
-      if (!mounted || s.userId == AppState.I.uid) return;
-      if (!AppState.I.isRescuer || !AppState.I.online.value) return; // offline → silent
-      SirenService.alertBeep();
-      final m = ScaffoldMessenger.of(context);
-      m.hideCurrentMaterialBanner();
-      m.showMaterialBanner(MaterialBanner(
-        backgroundColor: C.darkRed,
-        content: Text('NEW EMERGENCY ALERT: ${s.type}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-        leading: const Icon(Icons.warning, color: Colors.white),
-        actions: [
-          TextButton(
-              onPressed: () {
-                m.hideCurrentMaterialBanner();
-                SirenService.stop();
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const ResponderDashboard()));
-              },
-              child: const Text('VIEW', style: TextStyle(color: Colors.white))),
-        ],
-      ));
-    });
-  }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
+    AppState.I.markHome(); // shows the floating PROFILE button from now on
+    // NOTE: the siren pop-up for new SOS alerts lives in RootOverlay, so it
+    // works on every screen – not only here.
   }
 
   void _openResponder() {
@@ -60,11 +33,14 @@ class _HomeScreenState extends State<HomeScreen> {
           content: Text('You registered as a Help Seeker. Register as Rescuer or Both to respond.')));
       return;
     }
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const ResponderDashboard()));
+    if (AppNav.I.isOnStack('/responder')) return;
+    Navigator.push(context, MaterialPageRoute(settings: const RouteSettings(name: '/responder'), builder: (_) => const ResponderDashboard()));
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => AnimatedBuilder(animation: AppState.I, builder: (_, __) => _scaffold(context));
+
+  Widget _scaffold(BuildContext context) => Scaffold(
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
@@ -74,7 +50,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const Spacer(),
                 IconButton(
                     icon: const Icon(Icons.badge_outlined, size: 30, color: C.navy),
-                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VerificationScreen()))),
+                    onPressed: () => Navigator.push(context, MaterialPageRoute(settings: const RouteSettings(name: '/verification'), builder: (_) => const VerificationScreen()))),
                 IconButton(
                     icon: const Icon(Icons.volunteer_activism, size: 30, color: C.navy),
                     tooltip: 'Responder mode',
@@ -83,7 +59,7 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 6),
               Row(children: [
                 GestureDetector(
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SirenScreen())),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(settings: const RouteSettings(name: '/siren'), builder: (_) => const SirenScreen())),
                   child: Container(
                     width: 74, height: 74,
                     decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), border: Border.all(color: C.cyan, width: 2)),
@@ -132,7 +108,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900, color: C.navy)),
               const SizedBox(height: 14),
               GestureDetector(
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HighAlertScreen())),
+                onTap: () => Navigator.push(context, MaterialPageRoute(settings: const RouteSettings(name: '/high'), builder: (_) => const HighAlertScreen())),
                 child: Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(

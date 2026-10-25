@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services.dart';
 import '../ui_meta.dart';
 import '../widgets.dart';
 import 'blood_request.dart';
@@ -121,14 +122,14 @@ const kSosOptions = <String, List<SosOpt>>{
     SosOpt('Fire', 'g_fire'), SosOpt('Flood / Water', 'g_flood'),
     SosOpt('Rescue', 'g_rescue'), SosOpt('Evacuation', 'g_evacuation'),
     SosOpt('Missing Person', 'g_missing'), SosOpt('Shelter', 'g_shelter'),
-    SosOpt('Food & Water', 'g_food'), SosOpt('Blood Needed', 'g_blood'),
+    SosOpt('Blood Needed', 'g_blood'),
     SosOpt('Drug Abuse', 'g_drug'), SosOpt('Other Emergency', 'g_other'),
   ],
   'Women': [
     SosOpt('Immediate Danger', 'w_danger'), SosOpt('Harassment / Threat', 'w_harass'),
     SosOpt('Unsafe Situation', 'w_unsafe'), SosOpt('Escort Assistance', 'w_escort'),
     SosOpt('Medical Emergency', 'w_medical'), SosOpt('Safe Shelter', 'w_shelter'),
-    SosOpt('Blood Needed', 'w_blood'), SosOpt("Other Women’s Emergency", 'w_other'),
+    SosOpt('Missing / Lost', 'w_missing'), SosOpt("Other Women’s Emergency", 'w_other'),
   ],
   'Child': [
     SosOpt('Lost / Missing Child', 'c_lost'), SosOpt('Abuse / Unsafe Touch', 'c_abuse'),
@@ -149,11 +150,12 @@ class SosCategoryScreen extends StatelessWidget {
     final cat = '$kind SOS';
     final img = 'assets/ui/${o.key}.png';
     if (o.label == 'Blood Needed') {
-      Navigator.push(c, MaterialPageRoute(builder: (_) => BloodRequestScreen(category: cat, image: img)));
+      Navigator.push(c, MaterialPageRoute(settings: const RouteSettings(name: '/blood'), builder: (_) => BloodRequestScreen(category: cat, image: img)));
     } else {
       Navigator.push(
           c,
           MaterialPageRoute(
+              settings: const RouteSettings(name: '/confirm'),
               builder: (_) => ConfirmEmergencyScreen(
                   category: cat, type: o.label, icon: Icons.emergency, color: Colors.red, image: img)));
     }
@@ -244,4 +246,13 @@ class _OptionCard extends StatelessWidget {
           ]),
         );
       });
+}
+
+/// Artwork of the option a help seeker picked (null when there is none, e.g. High Alert).
+String? sosArtwork(Sos s) {
+  final kind = s.category.replaceAll(' SOS', '');
+  for (final o in kSosOptions[kind] ?? const <SosOpt>[]) {
+    if (o.label == s.type) return 'assets/ui/${o.key}.png';
+  }
+  return null;
 }

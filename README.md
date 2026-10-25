@@ -81,3 +81,24 @@ Registration image/document previews use selected file bytes (`XFile.readAsBytes
   video frame is shown as a still while the video loads. To also remove the *native* white launch screen run once:
   `dart run flutter_native_splash:create` (config is at the bottom of pubspec.yaml).
 * On Flutter **web** the intro plays muted (browsers block autoplay with sound).
+
+## What's new (v2 UI)
+- **Women SOS**: "Blood Needed" removed, **Missing / Lost** added (new artwork `assets/ui/w_missing.png`).
+- **Floating PROFILE button** (bottom-right, every screen) → dark, professional Profile page: stats, My Badges,
+  About Me, verification checklist + **COMPLETE PENDING VERIFICATION**, **SWITCH ROLE** (Help Seeker / Rescuer / Both).
+- **Appreciation**: 15 badges (`assets/badges/`), only offered after the help seeker taps **I AM SAFE**.
+  The responder gets a glowing spinning-badge reveal + splash; badges, ratings and reviews are stored in the Profile.
+- **SOS pop-up** with looping siren for ONLINE responders on any screen; one tap → **Active Alert** screen (redesigned).
+- Feedback tab removed from the responder dashboard. The optional Web build was removed from the GitHub workflow.
+
+### Backend note
+Everything is stored on the phone (SharedPreferences) and delivered through in-app streams
+(`AlertService` in `lib/services.dart`). To reach OTHER phones, connect Firebase (Firestore + FCM) at:
+`AlertService.dispatch` (SOS), `AlertService.sendAppreciation` (badge) and `AppState.receiveAppreciation` (profile).
+
+
+## App icon (added)
+The attached ResQ-Mitra logo is saved as `assets/icon/app_icon.jpg`. GitHub Actions runs `dart run flutter_launcher_icons` before building, so the Android launcher icon is generated for the APK.
+
+## Neon backend starter (added)
+See `backend/README.md`. Run `backend/sql/schema.sql` and `backend/sql/badges.sql` in Neon SQL Editor, then deploy the Node API from `backend/`. This is a secure-by-default scaffold requiring a real trusted authentication issuer before protected routes can be used. Current UI storage/alert streams are still local until explicitly wired to an authenticated API.

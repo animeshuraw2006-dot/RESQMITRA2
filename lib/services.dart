@@ -160,6 +160,21 @@ class Sos {
       '${details.isEmpty ? "" : " | ${details.entries.map((e) => "${e.key}: ${e.value}").join(", ")}"}';
 }
 
+/// Thanks / badge / rating sent by a help seeker after the SOS is closed.
+class Appreciation {
+  final String sosId, from, badgeKey, message, feedback;
+  final int rating;
+  final DateTime time;
+  Appreciation({
+    required this.sosId,
+    required this.from,
+    this.badgeKey = '',
+    this.message = '',
+    this.feedback = '',
+    this.rating = 0,
+  }) : time = DateTime.now();
+}
+
 /// In-app hub that connects help seekers and responders.
 /// This is an in-memory implementation – replace [dispatch]/[setStage]/[cancel]
 /// with Firebase (Firestore + FCM) calls so alerts reach OTHER phones.
@@ -171,14 +186,22 @@ class AlertService extends ChangeNotifier {
   Stream<Sos> get stream => _c.stream;
   Sos? mine; // SOS sent from this phone
   Sos? active; // alert shown to this phone when acting as responder
-  final List<String> badges = [];
 
   void dispatch(Sos s) {
     mine = s;
+    AppState.I.incSent();
     // TODO(backend): write to Firestore + push FCM to nearby online responders.
     _c.add(s);
     notifyListeners();
   }
+
+  // ── appreciation (help seeker → responder) ──
+  final _a = StreamController<Appreciation>.broadcast();
+  Stream<Appreciation> get appreciations => _a.stream;
+
+  /// TODO(backend): store in Firestore under the responder's uid + push (FCM) so the
+  /// responder's phone shows the badge reveal. Locally it is delivered through a stream.
+  void sendAppreciation(Appreciation a) => _a.add(a);
 
   void receive(Sos s) {
     active = s;
