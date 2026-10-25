@@ -53,3 +53,10 @@ flutter_native_splash:
   web_image_mode: cover
   android_12:
     color: "#FFFFFF"
+
+# App launcher icon generation configuration.
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/app_icon.jpg"
+  remove_alpha_ios: true
