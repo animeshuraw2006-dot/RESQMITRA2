@@ -1,6 +1,22 @@
 {
-  "name": "resq-mitra-api", "version": "1.0.0", "private": true, "type": "module",
-  "scripts": {"start": "node src/server.js", "dev": "node --watch src/server.js"},
-  "engines": {"node": ">=20"},
-  "dependencies": {"@aws-sdk/client-s3": "^3.850.0", "@aws-sdk/s3-request-presigner": "^3.850.0", "cors": "^2.8.5", "dotenv": "^16.4.7", "express": "^5.1.0", "helmet": "^8.1.0", "jsonwebtoken": "^9.0.2", "pg": "^8.16.3", "zod": "^4.0.5", "express-rate-limit": "^8.0.1"}
+  "name": "resqmitra-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "migrate": "node migrate.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "express-rate-limit": "^7.4.1",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1"
+  }
 }

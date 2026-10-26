@@ -1,39 +1,69 @@
-# RESQ-MITRA backend starter (Neon PostgreSQL + Node.js API)
+# ResQMitra backend (Neon PostgreSQL + Node API)
 
-This is a backend starter scaffold, not a deployed service. You must create your Neon project, run the SQL, configure secrets and connect a trusted authentication issuer before production use.
+```
+Phone app ──HTTPS──▶  API (backend/server.js, hosted on Render)  ──▶  Neon PostgreSQL
+                       • accounts & JWT login                          • users, contacts
+                       • SOS create / stages / cancel                  • sos, sos_events
+                       • photo, voice-note & ID storage                • files (bytea)
+                       • badges / ratings                              • appreciations
+```
+**Never put the Neon connection string inside the app.** An APK can be unpacked; the phone talks only to the API.
 
-## 1. Neon database
-1. Create a Neon project and database in the Neon Console.
-2. Open SQL Editor and run `sql/schema.sql`, then `sql/badges.sql`.
-3. Copy the pooled PostgreSQL connection string from Connect. Keep it only in backend environment variables.
+## 1 · Create the database (Neon)
+1. https://neon.tech → sign up → **Create project** (region: *Singapore* – closest to India / Andaman).
+2. On the project dashboard click **Connect**, tick **Connection pooling**, copy the string
+   `postgresql://…-pooler….neon.tech/neondb?sslmode=require` – this is your `DATABASE_URL`.
+3. Open **SQL Editor**, paste the whole of `backend/schema.sql`, press **Run** (NOT *Explain* – EXPLAIN cannot be used on CREATE TABLE and causes `syntax error at or near "uuid"`).
+   (or from your PC: `cd backend && npm install && cp .env.example .env`, edit `.env`, `npm run migrate`)
 
-## 2. Run API locally
-Requires Node.js 20+. Copy `.env.example` to `.env`, fill in `DATABASE_URL` and a random `JWT_SECRET` (32+ chars), then:
-
+## 2 · Test the API on your PC (optional)
 ```bash
+cd backend
 npm install
-npm start
+cp .env.example .env      # paste DATABASE_URL, set JWT_SECRET (see comment inside)
+npm run dev               # → http://localhost:8080/health   must answer {"ok":true}
 ```
 
-Check `GET /health`. Do not commit `.env`.
+## 3 · Deploy the API (Render – free)
+1. Push this repo to GitHub (already done).
+2. https://render.com → **New + → Web Service** → connect the repo.
+   * Root Directory: `backend`  · Build: `npm install`  · Start: `npm start`  · Health check path: `/health`
+   * (or **New + → Blueprint** and Render reads `render.yaml`)
+3. **Environment** → add `DATABASE_URL` (Neon string) and `JWT_SECRET` (long random text).
+4. Deploy. You get a URL like `https://resqmitra-api.onrender.com`; open `/health` to check.
 
-## 3. Authentication (required)
-Protected routes accept a JWT signed with HS256, issuer `resqmitra-api`, and a `sub` claim matching `profiles.auth_subject`. **This starter does not issue login tokens.** Configure a trusted auth provider or implement a secure server-side login/token exchange before using protected routes. Never hard-code a shared signing secret in Flutter or let the mobile app mint its own token. Demo OTP `123456` in the current Flutter app is not real verification.
+> Render's free plan sleeps after 15 min idle (first request ≈ 30–50 s). For an emergency app use a paid
+> always-on instance (≈ $7/mo) or Railway / Fly.io / Koyeb, or ping `/health` every 10 min with a free monitor (UptimeRobot).
 
-## 4. Deploy
-Deploy this `backend/` directory to a Node.js host that supports HTTPS and environment variables. Add `DATABASE_URL`, `JWT_SECRET`, and optional object-storage credentials as platform secrets. Restrict CORS to your real app/web origins. Do not expose database or storage credentials to the client.
+## 4 · Connect the app
+GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**
+`API_BASE` = `https://resqmitra-api.onrender.com` (no trailing slash). Run the workflow again –
+the APK is built with `--dart-define=API_BASE=…`. With the secret empty the app works exactly as before (local only).
 
-## 5. API routes included
-- `GET /health`
-- `GET /profile/me` (JWT required)
-- `POST /sos` (JWT required; persists SOS + status history)
-- `GET /sos/mine` (JWT required)
-- `POST /sos/:id/cancel` (JWT required; owner-only)
-- `POST /sos/:id/accept` (JWT required; verified and available responders only)
-- `POST /uploads/presign` (JWT required; optional S3-compatible private object storage)
+## What now works across phones
+| Feature | How |
+|---|---|
+| Registration, role switch, profile edits, photo & ID upload | `POST /auth/register`, `PUT /me/profile`, `POST /files` |
+| Help seeker sends SOS | `POST /sos` (retried 6×), photo/voice uploaded afterwards |
+| Online responders get the siren pop-up | app polls `GET /sos/nearby` every 5 s (50 km radius) |
+| Accept / on the way / arrived / provided | `PATCH /sos/:id/stage` – seeker's phone follows it live |
+| I AM SAFE | `POST /sos/:id/cancel` |
+| Badge + rating + message to the responder | `POST /appreciations` → responder phone collects it → glowing reveal |
+| Profile stats, badges, reviews, history | `GET /me/summary` (restored after reinstall *with the same account token*) |
 
-## Important gaps before a live emergency launch
-- No token issuance/auth provider integration is included.
-- Push notifications, background realtime delivery, SMS/OTP provider, proximity matching, responder escalation and upload completion/metadata registration still need integration and end-to-end tests.
-- The current Flutter app stores profiles, contacts, badges and alert streams locally in SharedPreferences/in-memory. This ZIP adds backend foundations but does not silently replace those local flows. Connect `lib/services.dart` to the deployed API only after auth is in place.
-- Review privacy, retention, legal, security, rate limiting, backups, monitoring, and emergency fallback requirements before production.
+## Limits you should know / next steps
+* **Push when the app is closed** needs Firebase Cloud Messaging (FCM): add a `push_tokens` table, send from the
+  `POST /sos` handler to nearby responders. Until then responders must have the app open and *Online*.
+* **Login after reinstall / new phone**: accounts are created per install (JWT token kept on the phone). Add real
+  phone-OTP (Firebase Phone Auth, MSG91, Twilio Verify) at `/auth/register` (marked `TODO(otp)`).
+* **Files** are stored in Postgres (`files.data`) – fine up to a few thousand images. Neon free = 0.5 GB. To scale,
+  upload to Cloudflare R2 / S3 and store only the URL (change `/files` handlers only).
+* ID documents are readable **only by their owner** (`GET /files/:id` checks it). Add encryption + a retention
+  policy before real-world launch (India DPDP Act 2023: collect only what you need, allow deletion).
+* Two responders can accept the same SOS: the first wins, the second gets `409 already_assigned`.
+
+## API cheat-sheet (all JSON, header `Authorization: Bearer <token>` except register/health)
+`POST /auth/register` · `GET /me` · `PUT /me/profile` · `PUT /me/presence` · `GET /me/summary` · `GET /me/appreciations`
+`POST /files?kind=photo|id_doc|sos_photo|sos_audio` (raw bytes, `Content-Type: image/jpeg`) · `GET /files/:id`
+`POST /sos` · `PATCH /sos/:id/files` · `GET /sos/nearby?lat&lng&radius_km` · `GET /sos/:id` · `PATCH /sos/:id/stage` · `POST /sos/:id/cancel`
+`POST /appreciations` · `GET /health`

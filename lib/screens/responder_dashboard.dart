@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import '../api.dart';
 import '../badges.dart';
 import '../services.dart';
 import '../state.dart';
@@ -322,14 +323,22 @@ class _ResponderDashboardState extends State<ResponderDashboard> with SingleTick
                     padding: const EdgeInsets.only(top: 12),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(14),
-                      child: Image.network(s.photo!, height: 140, width: double.infinity, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+                      child: Image.network(s.photo!, headers: Api.I.authHeaders, height: 140, width: double.infinity, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox.shrink()),
                     ),
                   ),
                 if (s.audio != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: TextButton.icon(
-                        onPressed: () => AudioPlayer().play(DeviceFileSource(s.audio!)),
+                        onPressed: () async {
+                          var path = s.audio!;
+                          if (path.startsWith('http')) {
+                            final f = await Api.I.downloadFile(path); // voice note stored on the server
+                            if (f == null) return;
+                            path = f;
+                          }
+                          AudioPlayer().play(DeviceFileSource(path));
+                        },
                         icon: const Icon(Icons.graphic_eq, color: _ice),
                         label: const Text('Play voice note', style: TextStyle(color: _ice))),
                   ),

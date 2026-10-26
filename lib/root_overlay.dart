@@ -31,12 +31,20 @@ class _RootOverlayState extends State<RootOverlay> {
     super.initState();
     _sos = AlertService.I.stream.listen(_onSos);
     _apr = AlertService.I.appreciations.listen(_onAppreciation);
+    // online responders poll the server for new SOS alerts + appreciation
+    AppState.I.addListener(_poll);
+    AppState.I.online.addListener(_poll);
+    _poll();
   }
+
+  void _poll() => AlertService.I.configurePolling();
 
   @override
   void dispose() {
     _sos?.cancel();
     _apr?.cancel();
+    AppState.I.removeListener(_poll);
+    AppState.I.online.removeListener(_poll);
     super.dispose();
   }
 

@@ -1,0 +1,15 @@
+# Optional: Render "Blueprint" – one-click deploy of the API (https://render.com)
+services:
+  - type: web
+    name: resqmitra-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false          # paste the Neon connection string in the Render dashboard
+      - key: JWT_SECRET
+        generateValue: true

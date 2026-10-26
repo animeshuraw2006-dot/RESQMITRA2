@@ -36,7 +36,7 @@ class _AppreciateScreenState extends State<AppreciateScreen> {
 
   void _submit() {
     final a = Appreciation(
-      sosId: widget.sos?.id ?? '',
+      sosId: widget.sos?.remoteId ?? widget.sos?.id ?? '',
       from: AppState.I.name,
       badgeKey: _badge?.key ?? '',
       message: _thanks.text.trim(),

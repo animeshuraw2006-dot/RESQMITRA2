@@ -31,7 +31,6 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^4.0.0
   flutter_native_splash: ^2.4.1
-  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
@@ -53,10 +52,3 @@ flutter_native_splash:
   web_image_mode: cover
   android_12:
     color: "#FFFFFF"
-
-# App launcher icon generation configuration.
-flutter_launcher_icons:
-  android: true
-  ios: true
-  image_path: "assets/icon/app_icon.jpg"
-  remove_alpha_ios: true

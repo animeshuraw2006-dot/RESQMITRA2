@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'api.dart';
+import 'config.dart';
 
 String roleLabel(String r) =>
     r == 'seeker' ? 'Help Seeker' : r == 'rescuer' ? 'Responder' : 'Responder & Help Seeker';
@@ -29,6 +32,7 @@ class AppState extends ChangeNotifier {
     }
     _ready = true;
     notifyListeners();
+    if (registered) unawaited(syncToServer()); // register (if needed) + pull badges/reviews
   }
 
   void markHome() {
@@ -38,6 +42,14 @@ class AppState extends ChangeNotifier {
   }
 
   String get uid => _p.getString('uid') ?? 'u0';
+  String get token => _p.getString('token') ?? '';
+
+  Future<void> setAuth(String uid, String token) async {
+    await _p.setString('uid', uid);
+    await _p.setString('token', token);
+    notifyListeners();
+  }
+
   bool get registered => _ready && (_p.getBool('registered') ?? false);
   String get role => _p.getString('role') ?? 'seeker'; // seeker | rescuer | both
   bool get isRescuer => role != 'seeker';
@@ -119,11 +131,13 @@ class AppState extends ChangeNotifier {
     await _p.setString('contacts', jsonEncode(contacts));
     await _p.setBool('registered', true);
     notifyListeners();
+    unawaited(syncToServer());
   }
 
   Future<void> setRole(String r) async {
     await _p.setString('role', r);
     notifyListeners();
+    unawaited(syncToServer());
   }
 
   /// Merges [patch] into the saved profile and rebuilds the emergency-contact list.
@@ -145,11 +159,84 @@ class AppState extends ChangeNotifier {
     }
     await _p.setString('contacts', jsonEncode(cs));
     notifyListeners();
+    unawaited(syncToServer());
   }
 
   void setOnline(bool v) {
     online.value = v;
     _p.setBool('online', v);
+    if (Api.I.on) unawaited(Api.I.presence(v));
+  }
+
+  // ───────────── backend sync (Neon via backend/server.js) ─────────────
+  bool _syncing = false, _again = false;
+
+  /// Uploads a profile image once (re-uploads only when the file path changes).
+  Future<String?> _fileId(String key, String kind) async {
+    final path = (profile[key] ?? '').toString();
+    if (path.isEmpty) return null;
+    final cached = _p.getString('up_$key') ?? '';
+    if (cached.startsWith('$path|')) return cached.substring(path.length + 1);
+    final id = await Api.I.uploadFile(path, kind);
+    if (id != null) await _p.setString('up_$key', '$path|$id');
+    return id;
+  }
+
+  /// Creates the account on first run, then keeps profile / role / contacts / images in sync.
+  Future<void> syncToServer() async {
+    if (!kBackendOn || !registered) return;
+    if (_syncing) {
+      _again = true;
+      return;
+    }
+    _syncing = true;
+    try {
+      if (token.isEmpty) {
+        final r = await Api.I.register(role, profile, contacts);
+        if (!r.ok) return; // offline – retried on next app start / next change
+        await setAuth(r.data['user_id'].toString(), r.data['token'].toString());
+      }
+      final photo = await _fileId('photo', 'photo');
+      final doc = await _fileId('docPhoto', 'id_doc');
+      await Api.I.syncProfile(role, profile, contacts, photoFile: photo, docFile: doc);
+      await syncFromServer();
+    } finally {
+      _syncing = false;
+      if (_again) {
+        _again = false;
+        unawaited(syncToServer());
+      }
+    }
+  }
+
+  /// Replaces the locally cached badges / reviews / responses with the server's copy.
+  Future<void> syncFromServer() async {
+    if (!Api.I.on) return;
+    final r = await Api.I.summary();
+    if (!r.ok) return;
+    List<Map<String, dynamic>> rows(String k) =>
+        ((r.data[k] as List?) ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
+    await _saveList('rbadges', [
+      for (final e in rows('badges'))
+        {'badge': e['badge_key'], 'from': e['from_name'], 'message': e['message'], 'time': e['created_at']}
+    ]);
+    await _saveList('reviews', [
+      for (final e in rows('reviews'))
+        {
+          'from': e['from_name'],
+          'rating': e['rating'],
+          'text': (e['feedback'] ?? '').toString().isNotEmpty ? e['feedback'] : e['message'],
+          'time': e['created_at']
+        }
+    ]);
+    await _saveList('responses', [
+      for (final e in rows('responses'))
+        {'type': e['type'], 'category': e['category'], 'name': e['name'], 'address': e['address'], 'time': e['updated_at']}
+    ]);
+    await _p.setInt('sent', (r.data['sent'] as num?)?.toInt() ?? sent);
+    final since = DateTime.tryParse((r.data['since'] ?? '').toString());
+    if (since != null) await _p.setInt('since', since.millisecondsSinceEpoch);
+    notifyListeners();
   }
 
   /// Wipes every saved value (Settings → Reset).

@@ -91,14 +91,6 @@ Registration image/document previews use selected file bytes (`XFile.readAsBytes
 - **SOS pop-up** with looping siren for ONLINE responders on any screen; one tap → **Active Alert** screen (redesigned).
 - Feedback tab removed from the responder dashboard. The optional Web build was removed from the GitHub workflow.
 
-### Backend note
-Everything is stored on the phone (SharedPreferences) and delivered through in-app streams
-(`AlertService` in `lib/services.dart`). To reach OTHER phones, connect Firebase (Firestore + FCM) at:
-`AlertService.dispatch` (SOS), `AlertService.sendAppreciation` (badge) and `AppState.receiveAppreciation` (profile).
-
-
-## App icon (added)
-The attached ResQ-Mitra logo is saved as `assets/icon/app_icon.jpg`. GitHub Actions runs `dart run flutter_launcher_icons` before building, so the Android launcher icon is generated for the APK.
-
-## Neon backend starter (added)
-See `backend/README.md`. Run `backend/sql/schema.sql` and `backend/sql/badges.sql` in Neon SQL Editor, then deploy the Node API from `backend/`. This is a secure-by-default scaffold requiring a real trusted authentication issuer before protected routes can be used. Current UI storage/alert streams are still local until explicitly wired to an authenticated API.
+### Backend
+A Neon PostgreSQL + Node API lives in `backend/` – see `backend/README.md` for the step-by-step setup.
+Add the GitHub secret `API_BASE` to switch the app from local-only mode to the shared backend.

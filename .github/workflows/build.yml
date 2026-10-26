@@ -41,15 +41,12 @@ jobs:
 
       - run: flutter pub get
 
-      - name: Generate app launcher icon
-        run: dart run flutter_launcher_icons
-
       - name: Native launch screen (first video frame)
         continue-on-error: true
         run: dart run flutter_native_splash:create
 
       - name: Build release APK
-        run: flutter build apk --release
+        run: flutter build apk --release --dart-define=API_BASE=${{ secrets.API_BASE }}
 
       - uses: actions/upload-artifact@v4
         with:
