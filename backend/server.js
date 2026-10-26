@@ -8,7 +8,14 @@ import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
 import pg from 'pg';
 
-const { DATABASE_URL, JWT_SECRET, PORT = 8080 } = process.env;
+const { DATABASE_URL, JWT_SECRET } = process.env;
+// Render injects PORT (usually 10000). A *blank* PORT env var is the empty string '' – the old
+// `PORT = 8080` default only covers `undefined`, so it crashed with ERR_SOCKET_BAD_PORT.
+// Parse it, and fall back to 8080 for anything missing / blank / not a valid port number.
+const PORT = (() => {
+  const n = Number.parseInt(String(process.env.PORT ?? '').trim(), 10);
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : 8080;
+})();
 if (!DATABASE_URL || !JWT_SECRET) {
   console.error('DATABASE_URL and JWT_SECRET must be set');
   process.exit(1);
@@ -113,9 +120,22 @@ const sosJson = (r, me) => ({
 });
 
 // ───────────────────────── health ─────────────────────────
-app.get('/health', wrap(async (_req, res) => {
+// Home page: opening the bare Render URL used to hit the 404 handler. Now it confirms the API is up.
+app.get('/', (_req, res) => res.json({
+  name: 'ResQMitra API',
+  status: 'running',
+  tagline: 'Be the first to respond',
+  health: '/health',
+  database_check: '/health/db',
+}));
+
+// Light check (no database) – used by Render's health check so a sleeping Neon DB never marks the service as down.
+app.get('/health', (_req, res) => res.json({ ok: true, uptime_s: Math.round(process.uptime()) }));
+
+// Deep check: also tests the Neon connection. Open this one to confirm DATABASE_URL is correct.
+app.get('/health/db', wrap(async (_req, res) => {
   await q('SELECT 1');
-  res.json({ ok: true });
+  res.json({ ok: true, database: 'connected' });
 }));
 
 // ───────────────────────── auth / profile ─────────────────────────
@@ -402,4 +422,5 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'server error' });
 });
 
-app.listen(PORT, () => console.log(`ResQMitra API listening on :${PORT}`));
+// 0.0.0.0 is required on Render so the platform's port scanner can reach the server.
+app.listen(PORT, '0.0.0.0', () => console.log(`ResQMitra API listening on :${PORT}`));

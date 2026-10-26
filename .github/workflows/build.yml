@@ -41,6 +41,9 @@ jobs:
 
       - run: flutter pub get
 
+      - name: App icon (white background)
+        run: dart run flutter_launcher_icons
+
       - name: Native launch screen (first video frame)
         continue-on-error: true
         run: dart run flutter_native_splash:create

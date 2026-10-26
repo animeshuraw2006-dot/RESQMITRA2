@@ -37,7 +37,7 @@ class _SplashScreenState extends State<SplashScreen> {
       } catch (_) {}
       _v.addListener(_watch);
     }).catchError((_) => _next());
-    _failsafe = Timer(const Duration(seconds: 11), _next);
+    _failsafe = Timer(const Duration(seconds: 8), _next);
   }
 
   void _watch() {

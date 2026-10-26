@@ -30,6 +30,8 @@ npm run dev               # → http://localhost:8080/health   must answer {"ok"
    * Root Directory: `backend`  · Build: `npm install`  · Start: `npm start`  · Health check path: `/health`
    * (or **New + → Blueprint** and Render reads `render.yaml`)
 3. **Environment** → add `DATABASE_URL` (Neon string) and `JWT_SECRET` (long random text).
+   * **Do NOT add a `PORT` variable** – Render sets it for you. A blank `PORT` used to crash the server
+     (`ERR_SOCKET_BAD_PORT`); the server now ignores blank/invalid values, but leaving it out is cleanest.
 4. Deploy. You get a URL like `https://resqmitra-api.onrender.com`; open `/health` to check.
 
 > Render's free plan sleeps after 15 min idle (first request ≈ 30–50 s). For an emergency app use a paid
