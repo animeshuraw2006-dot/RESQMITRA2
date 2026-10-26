@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS files (
   kind       text NOT NULL CHECK (kind IN ('photo','id_doc','sos_photo','sos_audio')),
   mime       text NOT NULL,
   size       int  NOT NULL,
-  data       bytea NOT NULL,
+  data       bytea NOT NULL DEFAULT ''::bytea,
+  storage_key text,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS files_owner_idx ON files (owner_id);
@@ -87,3 +88,7 @@ CREATE TABLE IF NOT EXISTS appreciations (
   UNIQUE (sos_id, from_user)
 );
 CREATE INDEX IF NOT EXISTS appr_to_idx ON appreciations (to_user, delivered);
+
+-- Safe migration for existing Neon databases.
+ALTER TABLE files ADD COLUMN IF NOT EXISTS storage_key text;
+ALTER TABLE files ALTER COLUMN data SET DEFAULT ''::bytea;

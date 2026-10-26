@@ -69,3 +69,29 @@ the APK is built with `--dart-define=API_BASE=…`. With the secret empty the ap
 `POST /files?kind=photo|id_doc|sos_photo|sos_audio` (raw bytes, `Content-Type: image/jpeg`) · `GET /files/:id`
 `POST /sos` · `PATCH /sos/:id/files` · `GET /sos/nearby?lat&lng&radius_km` · `GET /sos/:id` · `PATCH /sos/:id/stage` · `POST /sos/:id/cancel`
 `POST /appreciations` · `GET /health`
+
+## 5 · Configure S3-compatible object storage
+The API now supports Neon-compatible S3 object storage through the AWS SDK. In the object-storage dashboard, create a bucket and generate an access key/secret scoped to that bucket. Add these environment variables to the backend service (Render → Environment):
+
+- `S3_ENDPOINT`: the exact S3-compatible endpoint shown by your storage provider (not the Neon SQL connection string).
+- `S3_REGION`: the region shown by the provider, or `auto` if the provider specifies it.
+- `S3_BUCKET`: bucket name, e.g. `assets`.
+- `S3_ACCESS_KEY_ID`: access key ID.
+- `S3_SECRET_ACCESS_KEY`: secret access key.
+
+Do not paste these secrets into Flutter, GitHub source, screenshots or public chat. Keep the bucket private. The API streams files back only after authentication and enforces owner-only access for `id_doc`. If the S3 settings are absent, file uploads continue to use PostgreSQL as a backward-compatible fallback.
+
+**Existing database migration:** run the following once in the Neon SQL Editor before deploying this version:
+
+```sql
+ALTER TABLE files ADD COLUMN IF NOT EXISTS storage_key text;
+ALTER TABLE files ALTER COLUMN data SET DEFAULT ''::bytea;
+```
+
+Then redeploy the API. New files use object storage only when all three credentials and the endpoint are configured. Existing files remain in PostgreSQL; this migration does not automatically copy them to the bucket.
+
+## Project deliverables
+- Setup and environment variable instructions: this README and `.env.example`.
+- Architecture and trust-boundary notes: `docs/TECHNICAL_DESIGN.md`.
+- Sample test plan: `samples/test-cases.md`.
+- License: repository-root `LICENSE`.

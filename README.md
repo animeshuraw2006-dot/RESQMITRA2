@@ -94,3 +94,12 @@ Registration image/document previews use selected file bytes (`XFile.readAsBytes
 ### Backend
 A Neon PostgreSQL + Node API lives in `backend/` – see `backend/README.md` for the step-by-step setup.
 Add the GitHub secret `API_BASE` to switch the app from local-only mode to the shared backend.
+
+## Project documentation
+- Backend setup and environment variables: `backend/README.md` and `backend/.env.example`.
+- Architecture / technical design: `docs/TECHNICAL_DESIGN.md`.
+- Sample test cases: `samples/test-cases.md`.
+- License: `LICENSE`.
+
+### Object storage
+Configure the S3-compatible endpoint and bucket credentials only on the backend service. See `backend/README.md`; never place object-storage secrets in the Flutter app.

@@ -7,6 +7,8 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
 import pg from 'pg';
+import crypto from 'node:crypto';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 
 const { DATABASE_URL, JWT_SECRET } = process.env;
 // Render injects PORT (usually 10000). A *blank* PORT env var is the empty string '' – the old
@@ -20,6 +22,19 @@ if (!DATABASE_URL || !JWT_SECRET) {
   console.error('DATABASE_URL and JWT_SECRET must be set');
   process.exit(1);
 }
+
+const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
+const S3_BUCKET = process.env.S3_BUCKET || 'assets';
+const S3_REGION = process.env.S3_REGION || 'auto';
+const S3_ACCESS_KEY_ID = process.env.S3_ACCESS_KEY_ID || '';
+const S3_SECRET_ACCESS_KEY = process.env.S3_SECRET_ACCESS_KEY || '';
+const s3Enabled = Boolean(S3_ENDPOINT && S3_ACCESS_KEY_ID && S3_SECRET_ACCESS_KEY);
+const s3 = s3Enabled ? new S3Client({
+  endpoint: S3_ENDPOINT,
+  region: S3_REGION,
+  forcePathStyle: true,
+  credentials: { accessKeyId: S3_ACCESS_KEY_ID, secretAccessKey: S3_SECRET_ACCESS_KEY },
+}) : null;
 
 const pool = new pg.Pool({
   connectionString: DATABASE_URL,
@@ -250,21 +265,35 @@ app.post('/files', auth, uploadLimit, express.raw({ type: () => true, limit: '8m
   if (!KINDS.has(kind)) return bad(res, 'invalid kind');
   if (!MIMES.has(mime)) return bad(res, 'unsupported file type');
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) return bad(res, 'empty file');
+  // Prefer Neon-compatible S3 object storage when configured; retain the database fallback
+  // so existing deployments keep working until their S3 credentials are added.
+  const fileId = crypto.randomUUID();
+  let storageKey = null;
+  if (s3Enabled) {
+    storageKey = `users/${req.uid}/${kind}/${fileId}`;
+    await s3.send(new PutObjectCommand({ Bucket: S3_BUCKET, Key: storageKey, Body: req.body, ContentType: mime }));
+  }
   const r = await q(
-    'INSERT INTO files (owner_id, kind, mime, size, data) VALUES ($1,$2,$3,$4,$5) RETURNING id',
-    [req.uid, kind, mime, req.body.length, req.body],
+    'INSERT INTO files (id, owner_id, kind, mime, size, data, storage_key) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
+    [fileId, req.uid, kind, mime, req.body.length, s3Enabled ? Buffer.alloc(0) : req.body, storageKey],
   );
-  res.json({ file_id: r.rows[0].id });
+  res.json({ file_id: r.rows[0].id, storage: s3Enabled ? 'object' : 'database' });
 }));
 
 app.get('/files/:id', auth, wrap(async (req, res) => {
   if (!UUID.test(req.params.id)) return bad(res, 'not found', 404);
-  const r = await q('SELECT owner_id, kind, mime, data FROM files WHERE id=$1', [req.params.id]);
+  const r = await q('SELECT owner_id, kind, mime, data, storage_key FROM files WHERE id=$1', [req.params.id]);
   if (!r.rowCount) return bad(res, 'not found', 404);
   const f = r.rows[0];
   if (f.kind === 'id_doc' && f.owner_id !== req.uid) return bad(res, 'forbidden', 403); // ID documents: owner only
   res.set('Content-Type', f.mime);
   res.set('Cache-Control', 'private, max-age=86400');
+  if (f.storage_key && s3Enabled) {
+    const obj = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: f.storage_key }));
+    if (!obj.Body) return bad(res, 'stored file unavailable', 502);
+    for await (const chunk of obj.Body) res.write(chunk);
+    return res.end();
+  }
   res.send(f.data);
 }));
 

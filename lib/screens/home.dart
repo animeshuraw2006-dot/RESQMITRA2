@@ -10,7 +10,6 @@ import 'high_alert.dart';
 import 'responder_dashboard.dart';
 import 'siren_screen.dart';
 import 'sos_select.dart';
-import 'verification.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -48,9 +47,6 @@ class _HomeScreenState extends State<HomeScreen> {
               Row(children: [
                 const Text('RESQ-MITRA', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: C.navy)),
                 const Spacer(),
-                IconButton(
-                    icon: const Icon(Icons.badge_outlined, size: 30, color: C.navy),
-                    onPressed: () => Navigator.push(context, MaterialPageRoute(settings: const RouteSettings(name: '/verification'), builder: (_) => const VerificationScreen()))),
                 IconButton(
                     icon: const Icon(Icons.volunteer_activism, size: 30, color: C.navy),
                     tooltip: 'Responder mode',
