@@ -1,97 +1,167 @@
-# ResQMitra backend (Neon PostgreSQL + Node API)
+# 🧩 RESQ-MITRA Backend Setup
 
-```
-Phone app ──HTTPS──▶  API (backend/server.js, hosted on Render)  ──▶  Neon PostgreSQL
-                       • accounts & JWT login                          • users, contacts
-                       • SOS create / stages / cancel                  • sos, sos_events
-                       • photo, voice-note & ID storage                • files (bytea)
-                       • badges / ratings                              • appreciations
-```
-**Never put the Neon connection string inside the app.** An APK can be unpacked; the phone talks only to the API.
+This folder contains the Node.js/Express API and PostgreSQL schema used for shared accounts, SOS requests, rescue stages, appreciation records, and optional file storage.
 
-## 1 · Create the database (Neon)
-1. https://neon.tech → sign up → **Create project** (region: *Singapore* – closest to India / Andaman).
-2. On the project dashboard click **Connect**, tick **Connection pooling**, copy the string
-   `postgresql://…-pooler….neon.tech/neondb?sslmode=require` – this is your `DATABASE_URL`.
-3. Open **SQL Editor**, paste the whole of `backend/schema.sql`, press **Run** (NOT *Explain* – EXPLAIN cannot be used on CREATE TABLE and causes `syntax error at or near "uuid"`).
-   (or from your PC: `cd backend && npm install && cp .env.example .env`, edit `.env`, `npm run migrate`)
+## Architecture
 
-## 2 · Test the API on your PC (optional)
+- **Node.js + Express** API (`server.js`)
+- **Neon PostgreSQL** database (`schema.sql`)
+- **Renflair** for SMS OTP delivery (the API key stays on the server)
+- Optional **S3-compatible object storage** for photos and voice notes
+- **Render-compatible** web-service deployment
+
+## Prerequisites
+
+- Node.js 18+ (Node.js 20+ recommended)
+- A Neon PostgreSQL project
+- A Renflair account and API key for live SMS verification
+- Optional S3-compatible storage credentials
+
+## 1. Configure Neon
+
+1. Open your Neon project and select **Connect**.
+2. Copy the PostgreSQL connection string. Use the pooled connection string where appropriate and keep `sslmode=require`.
+3. Store it in a local `backend/.env` file as `DATABASE_URL`. Do not commit this file.
+4. Generate a strong JWT secret:
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+   ```
+5. Add your Renflair key:
+   ```dotenv
+   RENFLAIR_API_KEY=your_real_renflair_api_key
+   ```
+6. Apply the schema:
+   ```bash
+   npm install
+   npm run migrate
+   ```
+
+For PowerShell, the Node command above works without relying on newer PowerShell-specific conversion methods.
+
+## 2. Local development
+
 ```bash
 cd backend
 npm install
-cp .env.example .env      # paste DATABASE_URL, set JWT_SECRET (see comment inside)
-npm run dev               # → http://localhost:8080/health   must answer {"ok":true}
+cp .env.example .env
+# Edit .env and add real test credentials
+npm run migrate
+npm start
 ```
 
-## 3 · Deploy the API (Render – free)
-1. Push this repo to GitHub (already done).
-2. https://render.com → **New + → Web Service** → connect the repo.
-   * Root Directory: `backend`  · Build: `npm install`  · Start: `npm start`  · Health check path: `/health`
-   * (or **New + → Blueprint** and Render reads `render.yaml`)
-3. **Environment** → add `DATABASE_URL` (Neon string) and `JWT_SECRET` (long random text).
-   * **Do NOT add a `PORT` variable** – Render sets it for you. A blank `PORT` used to crash the server
-     (`ERR_SOCKET_BAD_PORT`); the server now ignores blank/invalid values, but leaving it out is cleanest.
-4. Deploy. You get a URL like `https://resqmitra-api.onrender.com`; open `/health` to check.
+The API defaults to `http://localhost:8080` for local development. Confirm:
 
-> Render's free plan sleeps after 15 min idle (first request ≈ 30–50 s). For an emergency app use a paid
-> always-on instance (≈ $7/mo) or Railway / Fly.io / Koyeb, or ping `/health` every 10 min with a free monitor (UptimeRobot).
+- `GET /health` — API process is running
+- `GET /health/db` — API can query Neon
 
-## 4 · Connect the app
-GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**
-`API_BASE` = `https://resqmitra-api.onrender.com` (no trailing slash). Run the workflow again –
-the APK is built with `--dart-define=API_BASE=…`. With the secret empty the app works exactly as before (local only).
+Do not expose a local development server with production credentials.
 
-## What now works across phones
-| Feature | How |
+## 3. Deploy to Render
+
+Create a Web Service and use:
+
+| Setting | Value |
 |---|---|
-| Registration, role switch, profile edits, photo & ID upload | `POST /auth/register`, `PUT /me/profile`, `POST /files` |
-| Help seeker sends SOS | `POST /sos` (retried 6×), photo/voice uploaded afterwards |
-| Online responders get the siren pop-up | app polls `GET /sos/nearby` every 5 s (50 km radius) |
-| Accept / on the way / arrived / provided | `PATCH /sos/:id/stage` – seeker's phone follows it live |
-| I AM SAFE | `POST /sos/:id/cancel` |
-| Badge + rating + message to the responder | `POST /appreciations` → responder phone collects it → glowing reveal |
-| Profile stats, badges, reviews, history | `GET /me/summary` (restored after reinstall *with the same account token*) |
+| Root Directory | `backend` |
+| Runtime | Node |
+| Build Command | `npm install` |
+| Start Command | `npm start` |
 
-## Limits you should know / next steps
-* **Push when the app is closed** needs Firebase Cloud Messaging (FCM): add a `push_tokens` table, send from the
-  `POST /sos` handler to nearby responders. Until then responders must have the app open and *Online*.
-* **Login after reinstall / new phone**: accounts are created per install (JWT token kept on the phone). Add real
-  phone-OTP (Firebase Phone Auth, MSG91, Twilio Verify) at `/auth/register` (marked `TODO(otp)`).
-* **Files** are stored in Postgres (`files.data`) – fine up to a few thousand images. Neon free = 0.5 GB. To scale,
-  upload to Cloudflare R2 / S3 and store only the URL (change `/files` handlers only).
-* ID documents are readable **only by their owner** (`GET /files/:id` checks it). Add encryption + a retention
-  policy before real-world launch (India DPDP Act 2023: collect only what you need, allow deletion).
-* Two responders can accept the same SOS: the first wins, the second gets `409 already_assigned`.
+Set these variables in the service's **Environment** settings:
 
-## API cheat-sheet (all JSON, header `Authorization: Bearer <token>` except register/health)
-`POST /auth/register` · `GET /me` · `PUT /me/profile` · `PUT /me/presence` · `GET /me/summary` · `GET /me/appreciations`
-`POST /files?kind=photo|id_doc|sos_photo|sos_audio` (raw bytes, `Content-Type: image/jpeg`) · `GET /files/:id`
-`POST /sos` · `PATCH /sos/:id/files` · `GET /sos/nearby?lat&lng&radius_km` · `GET /sos/:id` · `PATCH /sos/:id/stage` · `POST /sos/:id/cancel`
-`POST /appreciations` · `GET /health`
+| Name | Value |
+|---|---|
+| `DATABASE_URL` | Neon PostgreSQL connection string |
+| `JWT_SECRET` | Strong random secret generated on your computer |
+| `RENFLAIR_API_KEY` | Renflair API key |
+| `S3_ENDPOINT` | Optional storage endpoint |
+| `S3_REGION` | Optional; often `auto` for compatible services |
+| `S3_BUCKET` | Optional; defaults to `assets` |
+| `S3_ACCESS_KEY_ID` | Optional storage access key |
+| `S3_SECRET_ACCESS_KEY` | Optional storage secret key |
 
-## 5 · Configure S3-compatible object storage
-The API now supports Neon-compatible S3 object storage through the AWS SDK. In the object-storage dashboard, create a bucket and generate an access key/secret scoped to that bucket. Add these environment variables to the backend service (Render → Environment):
+Let Render set `PORT` automatically. Do not set it to a blank value. Do not add secrets to source files, GitHub workflow YAML, Flutter `--dart-define`, or a public issue.
 
-- `S3_ENDPOINT`: the exact S3-compatible endpoint shown by your storage provider (not the Neon SQL connection string).
-- `S3_REGION`: the region shown by the provider, or `auto` if the provider specifies it.
-- `S3_BUCKET`: bucket name, e.g. `assets`.
-- `S3_ACCESS_KEY_ID`: access key ID.
-- `S3_SECRET_ACCESS_KEY`: secret access key.
+After deployment, open `/health` and `/health/db`. If you change `schema.sql`, apply the migration to the same Neon database used by the deployed service and restart/redeploy the API.
 
-Do not paste these secrets into Flutter, GitHub source, screenshots or public chat. Keep the bucket private. The API streams files back only after authentication and enforces owner-only access for `id_doc`. If the S3 settings are absent, file uploads continue to use PostgreSQL as a backward-compatible fallback.
+> Hosting providers can change their pricing, free-tier limits and card-verification requirements. Review the current provider terms before creating a service.
 
-**Existing database migration:** run the following once in the Neon SQL Editor before deploying this version:
+## 4. Renflair phone OTP flow
 
-```sql
-ALTER TABLE files ADD COLUMN IF NOT EXISTS storage_key text;
-ALTER TABLE files ALTER COLUMN data SET DEFAULT ''::bytea;
-```
+The app's registration flow verifies only the account holder's phone number. Email addresses and emergency-contact numbers are not OTP-verified.
 
-Then redeploy the API. New files use object storage only when all three credentials and the endpoint are configured. Existing files remain in PostgreSQL; this migration does not automatically copy them to the bucket.
+### How it works
 
-## Project deliverables
-- Setup and environment variable instructions: this README and `.env.example`.
-- Architecture and trust-boundary notes: `docs/TECHNICAL_DESIGN.md`.
-- Sample test plan: `samples/test-cases.md`.
-- License: repository-root `LICENSE`.
+1. Flutter calls `POST /auth/otp/send` with the 10-digit Indian mobile number.
+2. The API generates a six-digit OTP, stores a digest with a five-minute expiry, and calls `https://sms.renflair.in/V1.php` with `API`, `PHONE` and `OTP` query parameters.
+3. Flutter asks the user to enter the received code.
+4. Flutter calls `POST /auth/otp/verify`. The API compares the digest, limits attempts and stores a verified-phone grant that expires after 30 minutes.
+5. `POST /auth/register` requires an unexpired verified-phone grant and consumes it on successful registration.
+
+The database migration creates `phone_otp_challenges` and `verified_phones`. Run the migration before deploying the OTP-enabled backend.
+
+### Provider configuration checklist
+
+- Use the API key from the Renflair account dashboard.
+- Ensure the account is active and has any required SMS balance/credits.
+- Confirm sender ID, template, DLT or other provider compliance requirements that apply to your account and destination.
+- Test with a phone you own.
+- Check the Renflair dashboard/provider response if messages are not received.
+- Never log or share the API key or OTP value.
+
+The API key is not included in the Flutter app. Provider availability and delivery are outside this repository's control. A successful API response does not guarantee that a message reached the handset.
+
+## 5. SOS photo and voice uploads
+
+The Flutter app creates the SOS first, then uploads optional attachments using `POST /files?kind=sos_photo` or `POST /files?kind=sos_audio`, and links the returned file IDs through `PATCH /sos/:id/files`.
+
+- Uploads require a valid bearer token.
+- The API accepts a limited allowlist of image/audio MIME types and limits the raw request size to 8 MB.
+- When S3-compatible storage is configured, object bytes are stored there; otherwise, the PostgreSQL `bytea` fallback is used.
+- The file endpoint only serves SOS media to the help seeker or the responder assigned to that SOS after acceptance.
+- ID documents are owner-only.
+
+For object storage, use a private bucket and credentials with the minimum required permissions. Never place object-storage credentials in Flutter or publish media URLs in a public issue.
+
+## 6. Important API routes
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/health` | Liveness check |
+| `GET` | `/health/db` | Database connectivity check |
+| `POST` | `/auth/otp/send` | Request SMS OTP |
+| `POST` | `/auth/otp/verify` | Verify phone OTP |
+| `POST` | `/auth/register` | Register with verified phone |
+| `GET` | `/me` | Read account and contacts |
+| `PUT` | `/me/profile` | Update profile and contacts |
+| `PUT` | `/me/presence` | Update responder availability/location |
+| `POST` | `/sos` | Create SOS |
+| `GET` | `/sos/nearby` | Poll for nearby SOS requests |
+| `GET` | `/sos/:id` | Read SOS status |
+| `PATCH` | `/sos/:id/files` | Attach uploaded media IDs |
+| `PATCH` | `/sos/:id/stage` | Accept/update rescue stage |
+| `POST` | `/sos/:id/cancel` | Cancel a request |
+| `POST` | `/files?kind=...` | Upload a file |
+| `GET` | `/files/:id` | Fetch an authorised file |
+
+Protected endpoints use a bearer token returned at registration. Do not share tokens or include them in logs.
+
+## 7. Troubleshooting
+
+| Symptom | Checks |
+|---|---|
+| `DATABASE_URL and JWT_SECRET must be set` | Set both environment variables in the correct backend service |
+| `/health` succeeds, `/health/db` fails | Check the Neon connection string, SSL mode, credentials and project status |
+| OTP endpoint returns `503` | `RENFLAIR_API_KEY` is missing in the backend environment |
+| OTP endpoint returns `502` | Check Renflair status, key validity, account balance, provider configuration and network access |
+| Registration rejects the phone | Verify the same 10-digit number and complete registration within 30 minutes |
+| Media not visible to responder | Ensure the responder accepted the SOS, upload completed, schema is current, and both devices use the same API |
+| Upload fails | Check MIME type, 8 MB limit, auth token, database/storage availability and backend logs |
+
+## 🔐 Security
+
+- Keep `.env` out of version control.
+- Rotate credentials immediately if exposed.
+- Use HTTPS in production.
+- Do not share real emergency details when asking for help.
+- Review the repository's [`SECURITY.md`](../SECURITY.md) for responsible vulnerability reporting.

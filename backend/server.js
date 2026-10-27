@@ -10,7 +10,7 @@ import pg from 'pg';
 import crypto from 'node:crypto';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 
-const { DATABASE_URL, JWT_SECRET } = process.env;
+const { DATABASE_URL, JWT_SECRET, RENFLAIR_API_KEY } = process.env;
 // Render injects PORT (usually 10000). A *blank* PORT env var is the empty string '' – the old
 // `PORT = 8080` default only covers `undefined`, so it crashed with ERR_SOCKET_BAD_PORT.
 // Parse it, and fall back to 8080 for anything missing / blank / not a valid port number.
@@ -67,6 +67,8 @@ app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 app.use(rateLimit({ windowMs: 60_000, limit: 240, standardHeaders: true, legacyHeaders: false }));
 const registerLimit = rateLimit({ windowMs: 60 * 60_000, limit: 20 });
+const otpSendLimit = rateLimit({ windowMs: 15 * 60_000, limit: 5, message: { error: 'Too many OTP requests. Please wait and try again.' } });
+const otpVerifyLimit = rateLimit({ windowMs: 15 * 60_000, limit: 15, message: { error: 'Too many verification attempts. Please wait and try again.' } });
 const uploadLimit = rateLimit({ windowMs: 60_000, limit: 20 });
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -153,18 +155,115 @@ app.get('/health/db', wrap(async (_req, res) => {
   res.json({ ok: true, database: 'connected' });
 }));
 
+// ───────────────────────── phone OTP (Renflair) ─────────────────────────
+function normalizeIndianPhone(value) {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  // This registration form currently collects Indian 10-digit mobile numbers.
+  return digits.length === 10 ? digits : null;
+}
+function otpDigest(phone, otp) {
+  return crypto.createHash('sha256').update(`${phone}:${otp}:${JWT_SECRET}`).digest('hex');
+}
+app.post('/auth/otp/send', otpSendLimit, wrap(async (req, res) => {
+  const phone = normalizeIndianPhone(req.body?.phone);
+  if (!phone) return bad(res, 'Enter a valid 10-digit Indian mobile number');
+  if (!RENFLAIR_API_KEY) return bad(res, 'SMS OTP service is not configured on the backend', 503);
+
+  const prior = await q('SELECT last_sent_at FROM phone_otp_challenges WHERE phone=$1', [phone]);
+  if (prior.rowCount && Date.now() - new Date(prior.rows[0].last_sent_at).getTime() < 60_000) {
+    return bad(res, 'Please wait 60 seconds before requesting another OTP', 429);
+  }
+
+  const otp = String(crypto.randomInt(100000, 1000000));
+  await q(
+    `INSERT INTO phone_otp_challenges (phone, otp_hash, expires_at, attempts, last_sent_at)
+     VALUES ($1,$2,now() + interval '5 minutes',0,now())
+     ON CONFLICT (phone) DO UPDATE SET otp_hash=EXCLUDED.otp_hash,
+       expires_at=EXCLUDED.expires_at, attempts=0, last_sent_at=now()`,
+    [phone, otpDigest(phone, otp)],
+  );
+
+  try {
+    const url = new URL('https://sms.renflair.in/V1.php');
+    url.searchParams.set('API', RENFLAIR_API_KEY);
+    url.searchParams.set('PHONE', phone);
+    url.searchParams.set('OTP', otp);
+    const providerResponse = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
+    const providerBody = await providerResponse.text();
+    let providerJson = null;
+    try { providerJson = JSON.parse(providerBody); } catch {}
+    const providerText = typeof providerJson === 'object' && providerJson
+      ? JSON.stringify(providerJson).toLowerCase() : providerBody.toLowerCase();
+    const providerFailed = !providerResponse.ok ||
+      (providerJson && (providerJson.success === false ||
+        ['error', 'failed'].includes(String(providerJson.status ?? '').toLowerCase()))) ||
+      /invalid api|insufficient balance/i.test(providerText);
+    if (providerFailed) {
+      await q('DELETE FROM phone_otp_challenges WHERE phone=$1', [phone]);
+      console.error('Renflair OTP request failed with HTTP', providerResponse.status);
+      return bad(res, 'SMS provider could not send the OTP. Check the Renflair account and API configuration.', 502);
+    }
+    res.json({ ok: true, message: 'OTP request submitted. Check your SMS messages.' });
+  } catch (e) {
+    await q('DELETE FROM phone_otp_challenges WHERE phone=$1', [phone]).catch(() => {});
+    console.error('Renflair OTP request failed:', e?.name || 'provider error');
+    return bad(res, 'Could not contact the SMS provider. Please try again.', 502);
+  }
+}));
+
+app.post('/auth/otp/verify', otpVerifyLimit, wrap(async (req, res) => {
+  const phone = normalizeIndianPhone(req.body?.phone);
+  const otp = String(req.body?.otp ?? '').trim();
+  if (!phone || !/^\\d{6}$/.test(otp)) return bad(res, 'Enter the 6-digit OTP sent to your phone');
+  const r = await q('SELECT otp_hash, expires_at, attempts FROM phone_otp_challenges WHERE phone=$1', [phone]);
+  if (!r.rowCount) return bad(res, 'OTP expired or not requested. Request a new OTP.', 400);
+  const challenge = r.rows[0];
+  if (new Date(challenge.expires_at).getTime() < Date.now()) {
+    await q('DELETE FROM phone_otp_challenges WHERE phone=$1', [phone]);
+    return bad(res, 'OTP expired. Request a new one.', 400);
+  }
+  if (challenge.attempts >= 5) {
+    await q('DELETE FROM phone_otp_challenges WHERE phone=$1', [phone]);
+    return bad(res, 'Too many incorrect attempts. Request a new OTP.', 429);
+  }
+  const expected = Buffer.from(challenge.otp_hash, 'hex');
+  const actual = Buffer.from(otpDigest(phone, otp), 'hex');
+  if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) {
+    await q('UPDATE phone_otp_challenges SET attempts=attempts+1 WHERE phone=$1', [phone]);
+    return bad(res, 'Incorrect OTP. Please check the code and try again.', 400);
+  }
+  await q(
+    `INSERT INTO verified_phones (phone, verified_at, expires_at)
+     VALUES ($1,now(),now() + interval '30 minutes')
+     ON CONFLICT (phone) DO UPDATE SET verified_at=now(), expires_at=now() + interval '30 minutes'`,
+    [phone],
+  );
+  await q('DELETE FROM phone_otp_challenges WHERE phone=$1', [phone]);
+  res.json({ ok: true, verified: true });
+}));
+
 // ───────────────────────── auth / profile ─────────────────────────
-// TODO(otp): the app verifies OTP locally (demo code 123456). For production add a real
-// provider (Firebase Phone Auth / MSG91 / Twilio Verify) and require its proof here.
 app.post('/auth/register', registerLimit, wrap(async (req, res) => {
   const { role, profile, contacts } = req.body || {};
   if (!ROLES.has(role)) return bad(res, 'invalid role');
   const p = cleanProfile(profile);
   const name = str(p.name, 100);
   if (!name) return bad(res, 'name required');
+  const phone = normalizeIndianPhone(p.mobile);
+  if (!phone || phone !== str(p.mobile, 20).replace(/\D/g, '')) {
+    return bad(res, 'A verified 10-digit Indian mobile number is required');
+  }
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const verified = await client.query(
+      'SELECT phone FROM verified_phones WHERE phone=$1 AND expires_at > now() FOR UPDATE',
+      [phone],
+    );
+    if (!verified.rowCount) {
+      await client.query('ROLLBACK');
+      return bad(res, 'Verify this phone number by SMS OTP before registering', 403);
+    }
     const r = await client.query(
       `INSERT INTO users (role, name, mobile, email, blood_group, profile)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
@@ -172,6 +271,7 @@ app.post('/auth/register', registerLimit, wrap(async (req, res) => {
     );
     const id = r.rows[0].id;
     await saveContacts(client, id, contacts);
+    await client.query('DELETE FROM verified_phones WHERE phone=$1', [phone]);
     await client.query('COMMIT');
     const token = jwt.sign({ sub: id }, JWT_SECRET, { expiresIn: '365d' });
     res.json({ user_id: id, token });
@@ -192,6 +292,23 @@ app.put('/me/profile', auth, wrap(async (req, res) => {
     if (!cur.rowCount) { await client.query('ROLLBACK'); return bad(res, 'user not found', 404); }
     const u = cur.rows[0];
     const p = profile ? cleanProfile(profile) : u.profile;
+    const oldPhone = normalizeIndianPhone(u.mobile);
+    const nextPhone = normalizeIndianPhone(profile ? p.mobile : u.mobile);
+    if (!nextPhone) {
+      await client.query('ROLLBACK');
+      return bad(res, 'A valid 10-digit Indian mobile number is required');
+    }
+    if (nextPhone !== oldPhone) {
+      const verified = await client.query(
+        'SELECT phone FROM verified_phones WHERE phone=$1 AND expires_at > now() FOR UPDATE',
+        [nextPhone],
+      );
+      if (!verified.rowCount) {
+        await client.query('ROLLBACK');
+        return bad(res, 'Verify the new phone number by SMS OTP before updating your profile', 403);
+      }
+      await client.query('DELETE FROM verified_phones WHERE phone=$1', [nextPhone]);
+    }
     await client.query(
       `UPDATE users SET role=$2, name=$3, mobile=$4, email=$5, blood_group=$6, profile=$7,
               photo_file=COALESCE($8, photo_file), doc_file=COALESCE($9, doc_file), updated_at=now()
@@ -286,6 +403,16 @@ app.get('/files/:id', auth, wrap(async (req, res) => {
   if (!r.rowCount) return bad(res, 'not found', 404);
   const f = r.rows[0];
   if (f.kind === 'id_doc' && f.owner_id !== req.uid) return bad(res, 'forbidden', 403); // ID documents: owner only
+  if (f.kind === 'sos_photo' || f.kind === 'sos_audio') {
+    const access = await q(
+      `SELECT 1 FROM sos
+        WHERE (photo_file=$1 OR audio_file=$1)
+          AND (user_id=$2 OR (responder_id=$2 AND stage >= 1))
+        LIMIT 1`,
+      [req.params.id, req.uid],
+    );
+    if (!access.rowCount) return bad(res, 'forbidden', 403);
+  }
   res.set('Content-Type', f.mime);
   res.set('Cache-Control', 'private, max-age=86400');
   if (f.storage_key && s3Enabled) {

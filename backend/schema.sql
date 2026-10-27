@@ -92,3 +92,18 @@ CREATE INDEX IF NOT EXISTS appr_to_idx ON appreciations (to_user, delivered);
 -- Safe migration for existing Neon databases.
 ALTER TABLE files ADD COLUMN IF NOT EXISTS storage_key text;
 ALTER TABLE files ALTER COLUMN data SET DEFAULT ''::bytea;
+
+
+-- SMS OTP challenges are stored server-side; only a salted hash is retained.
+CREATE TABLE IF NOT EXISTS phone_otp_challenges (
+  phone       text PRIMARY KEY,
+  otp_hash    text NOT NULL,
+  expires_at  timestamptz NOT NULL,
+  attempts    int NOT NULL DEFAULT 0,
+  last_sent_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS verified_phones (
+  phone       text PRIMARY KEY,
+  verified_at timestamptz NOT NULL DEFAULT now(),
+  expires_at  timestamptz NOT NULL
+);

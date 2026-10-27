@@ -318,7 +318,7 @@ class _ResponderDashboardState extends State<ResponderDashboard> with SingleTick
                 else
                   Wrap(spacing: 8, runSpacing: 8, children: [for (final t in s.tags) _pill(t, const Color(0xFFFFC53D), i: Icons.label)]),
                 for (final e in s.details.entries) _kv(e.key, e.value),
-                if (s.photo != null && (s.photo!.startsWith('https://') || s.photo!.startsWith('http://')))
+                if (s.stage >= 1 && s.photo != null && (s.photo!.startsWith('https://') || s.photo!.startsWith('http://')))
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
                     child: ClipRRect(
@@ -326,7 +326,7 @@ class _ResponderDashboardState extends State<ResponderDashboard> with SingleTick
                       child: Image.network(s.photo!, headers: Api.I.authHeaders, height: 140, width: double.infinity, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox.shrink()),
                     ),
                   ),
-                if (s.audio != null)
+                if (s.stage >= 1 && s.audio != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: TextButton.icon(
@@ -464,29 +464,6 @@ class _ResponderDashboardState extends State<ResponderDashboard> with SingleTick
       );
 
   // ───────────── SETTINGS TAB ─────────────
-  Future<void> _simulate() async {
-    final p = _me ?? await LocationService.current();
-    final lat = (p?.latitude ?? 11.6234) + 0.01, lng = (p?.longitude ?? 92.7265) + 0.01;
-    final s = Sos(
-      id: 'demo${DateTime.now().millisecondsSinceEpoch}',
-      userId: 'demo-user',
-      category: 'Women SOS',
-      type: 'Immediate Danger',
-      name: 'Demo user',
-      phone: '9876543210',
-      lat: lat,
-      lng: lng,
-      desc: 'I am being followed. Near the bus stop. Please help.',
-    );
-    AlertService.I.receive(s); // → siren pop-up for online responders
-  }
-
-  void _simulateBadge() {
-    final b = kBadges[DateTime.now().millisecond % kBadges.length];
-    AlertService.I.sendAppreciation(Appreciation(
-        sosId: 'demo', from: 'Demo user', badgeKey: b.key, message: 'Thank you for helping me when I needed it most.', rating: 5));
-  }
-
   Widget _setTile(IconData i, String t, String sub, VoidCallback onTap) => Container(
         margin: const EdgeInsets.only(bottom: 10),
         decoration: BoxDecoration(color: _card, borderRadius: BorderRadius.circular(18), border: Border.all(color: _line)),
@@ -511,8 +488,6 @@ class _ResponderDashboardState extends State<ResponderDashboard> with SingleTick
                 value: on,
                 onChanged: AppState.I.setOnline),
           ),
-          _setTile(Icons.crisis_alert, 'Simulate incoming SOS (demo)', 'Test the siren pop-up + Active Alert screen on one phone', _simulate),
-          _setTile(Icons.workspace_premium, 'Simulate a received badge (demo)', 'Preview the glowing badge reveal', _simulateBadge),
         ]),
       );
 

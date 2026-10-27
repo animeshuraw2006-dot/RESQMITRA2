@@ -341,12 +341,18 @@ class AlertService extends ChangeNotifier {
           if (cur != null && cur.id == id) {
             // refresh the alert that is already on screen
             final cancelled = status == 'cancelled';
-            if (cur.stage != stage || cur.cancelled != cancelled || cur.responder != j['responder_name']) {
-              cur.stage = stage > cur.stage ? stage : cur.stage;
-              cur.cancelled = cancelled;
-              cur.responder = j['responder_name']?.toString() ?? cur.responder;
-              notifyListeners();
-            }
+            final photoId = j['photo_file']?.toString();
+            final audioId = j['audio_file']?.toString();
+            final nextPhoto = (photoId != null && photoId.isNotEmpty) ? Api.I.fileUrl(photoId) : cur.photo;
+            final nextAudio = (audioId != null && audioId.isNotEmpty) ? Api.I.fileUrl(audioId) : cur.audio;
+            final changed = cur.stage != stage || cur.cancelled != cancelled ||
+                cur.responder != j['responder_name'] || cur.photo != nextPhoto || cur.audio != nextAudio;
+            cur.stage = stage > cur.stage ? stage : cur.stage;
+            cur.cancelled = cancelled;
+            cur.responder = j['responder_name']?.toString() ?? cur.responder;
+            cur.photo = nextPhoto;
+            cur.audio = nextAudio;
+            if (changed) notifyListeners();
             _seen.add(id);
             continue;
           }

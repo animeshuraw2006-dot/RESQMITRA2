@@ -1,30 +1,38 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:resqmitra/main.dart';
+import 'package:resqmitra/services.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  test('SOS message contains emergency type and a location link', () {
+    final sos = Sos(
+      id: 'test-sos',
+      userId: 'test-user',
+      category: 'General SOS',
+      type: 'Medical emergency',
+      name: 'Test seeker',
+      phone: '9876543210',
+      lat: 11.6234,
+      lng: 92.7265,
+      desc: 'Test-only emergency description',
+    );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(sos.smsText, contains('Medical emergency'));
+    expect(sos.smsText, contains('Test seeker needs help'));
+    expect(sos.smsText, contains('https://maps.google.com/?q=11.6234,92.7265'));
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+  test('high-alert SOS is clearly identified in the contact message', () {
+    final sos = Sos(
+      id: 'test-high-alert',
+      userId: 'test-user',
+      category: 'High Alert SOS',
+      type: 'Immediate danger',
+      name: 'Test seeker',
+      phone: '9876543210',
+      lat: 11.6234,
+      lng: 92.7265,
+      highAlert: true,
+    );
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(sos.smsText, contains('HIGH ALERT'));
   });
 }

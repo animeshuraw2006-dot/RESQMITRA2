@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services.dart';
+import '../api.dart';
 import '../state.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -125,22 +126,49 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   }
 
   Future<void> _verify(String key, String target) async {
-    if (target.trim().isEmpty) return _snack('Enter the value first');
+    if (key != 'mobile') return;
+    final phone = target.replaceAll(RegExp(r'\D'), '');
+    if (phone.length != 10) return _snack('Enter a valid 10-digit Indian mobile number');
+    final sent = await Api.I.sendPhoneOtp(phone);
+    if (!mounted) return;
+    if (!sent.ok) {
+      return _snack(sent.data['error']?.toString() ??
+          'Could not send OTP. Check the backend and Renflair configuration.');
+    }
     final code = TextEditingController();
-    final ok = await showDialog<bool>(
-        context: context,
-        builder: (_) => AlertDialog(
-              title: Text('Verify $target'),
-              content: Column(mainAxisSize: MainAxisSize.min, children: [
-                const Text('Enter the 6-digit code.\nDemo mode: use 123456\n(connect Firebase Auth for real OTP)'),
-                TextField(controller: code, keyboardType: TextInputType.number, maxLength: 6),
-              ]),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-                TextButton(onPressed: () => Navigator.pop(context, code.text == '123456'), child: const Text('Verify')),
-              ],
-            ));
-    if (ok == true) setState(() => _v['${key}V'] = true);
+    final entered = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Verify +91 $phone'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('Enter the verification code sent to your mobile number.'),
+          const SizedBox(height: 8),
+          TextField(
+            controller: code,
+            keyboardType: TextInputType.number,
+            maxLength: 6,
+            decoration: const InputDecoration(labelText: 'SMS verification code'),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, code.text.trim()), child: const Text('Verify')),
+        ],
+      ),
+    );
+    code.dispose();
+    if (entered == null || entered.isEmpty || !mounted) return;
+    final result = await Api.I.verifyPhoneOtp(phone, entered);
+    if (!mounted) return;
+    if (result.ok) {
+      setState(() {
+        _v['mobileV'] = true;
+        _v['verifiedMobile'] = phone;
+      });
+      _snack('Phone number verified successfully');
+    } else {
+      _snack(result.data['error']?.toString() ?? 'OTP verification failed. Please try again.');
+    }
   }
 
   Future<void> _gps() async {
@@ -177,7 +205,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                     if (!req && (s == null || s.isEmpty)) return null;
                     return (s == null || s.length != 10) ? 'Enter 10 digits' : null;
                   })),
-          if (verifyKey != null) ...[
+          if (verifyKey == 'mobile') ...[
             const SizedBox(width: 8),
             Padding(
                 padding: const EdgeInsets.only(top: 25),
@@ -188,7 +216,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                             backgroundColor: C.royal, foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                         onPressed: () => _verify(verifyKey, _t(k).text),
-                        child: Text(verifyKey == 'email' ? 'Verify' : 'Send OTP')))),
+                        child: const Text('Send OTP')))),
           ],
         ]),
       );
@@ -235,19 +263,13 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         _dd('country', 'Country', ['India'], req: true),
       ]);
 
-  Widget _contactVerify() => _sec('Contact Verification', 'Verify your mobile number and email', [
+  Widget _contactVerify() => _sec('Contact Verification', 'Verify your phone number. Email and emergency contacts do not require OTP.', [
         _phone('mobile', 'Mobile Number', req: true, verifyKey: 'mobile'),
         if (_v['mobileV'] == true) const OkChip('Mobile number verified'),
         _phone('altMobile', 'Alternate Mobile Number (Optional)'),
         AppField(label: 'Email Address', ctrl: _t('email'), required: true, type: TextInputType.emailAddress,
             hint: 'you@example.com',
             validator: (s) => (s == null || !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(s)) ? 'Enter a valid email' : null),
-        Align(
-            alignment: Alignment.centerRight,
-            child: Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: OutlinedButton(onPressed: () => _verify('email', _t('email').text), child: const Text('Verify Email')))),
-        if (_v['emailV'] == true) const OkChip('Email verified'),
         AppField(label: 'Confirm Email Address', ctrl: _t('email2'), required: true, hint: 'you@example.com',
             validator: (s) => s != _t('email').text ? 'Emails do not match' : null),
       ]);
@@ -297,7 +319,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         _f('c${i}name', 'Full Name', req: i == 0, hint: 'Enter name'),
         _dd('c${i}rel', 'Relationship', kRelations, req: i == 0),
         _phone('c${i}phone', 'Mobile Number', req: i == 0, verifyKey: 'c$i'),
-        if (_v['c${i}V'] == true) const OkChip('Contact verified'),
+        
         _phone('c${i}alt', 'Alternate Number (Optional)'),
         _f('c${i}email', 'Email (Optional)', type: TextInputType.emailAddress),
         const Text('Preferred Contact Method', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: C.navy)),
@@ -430,7 +452,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     bool has(String k) => _t(k).text.trim().isNotEmpty;
     return _sec('Review & Consent', 'Please review your details before submitting', [
       row('Personal Details', has('name') && has('dob')),
-      row('Contact Verification', _v['mobileV'] == true && _v['emailV'] == true),
+      row('Phone Verification', _v['mobileV'] == true),
       row('Address & Location', has('phouse') && _v['lat'] != null),
       row('Emergency Contacts', has('c0name') && has('c0phone')),
       row('Medical Information', has('allergies') || has('conditions') || _v['blood'] != null),
@@ -451,7 +473,10 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
 
   Future<void> _submit() async {
     if (!_form.currentState!.validate()) return _snack('Please fill the highlighted fields');
-    if (_v['mobileV'] != true || _v['emailV'] != true) return _snack('Verify your mobile number and email');
+    if (_v['mobileV'] != true ||
+        _v['verifiedMobile'] != _t('mobile').text.replaceAll(RegExp(r'\D'), '')) {
+      return _snack('Verify your current phone number with SMS OTP');
+    }
     if (_v['lat'] == null) return _snack('Verify your current location (GPS)');
     if (_rescuer && ((_v['skills'] as List?) ?? []).isEmpty) return _snack('Select at least one skill');
     if (_rescuer && _v['docPhoto'] == null) return _snack('Upload an identity document');

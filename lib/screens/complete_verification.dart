@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services.dart';
+import '../api.dart';
 import '../state.dart';
 import '../theme.dart';
 import '../verify_items.dart';
@@ -127,22 +128,49 @@ class _CompleteVerificationScreenState extends State<CompleteVerificationScreen>
   }
 
   Future<void> _verify(String flag, String target) async {
-    if (target.trim().isEmpty) return _snack('Enter the value first');
+    if (flag != 'mobileV') return;
+    final phone = target.replaceAll(RegExp(r'\D'), '');
+    if (phone.length != 10) return _snack('Enter a valid 10-digit Indian mobile number');
+    final sent = await Api.I.sendPhoneOtp(phone);
+    if (!mounted) return;
+    if (!sent.ok) {
+      return _snack(sent.data['error']?.toString() ??
+          'Could not send OTP. Check the backend and Renflair configuration.');
+    }
     final code = TextEditingController();
-    final ok = await showDialog<bool>(
-        context: context,
-        builder: (_) => AlertDialog(
-              title: Text('Verify $target'),
-              content: Column(mainAxisSize: MainAxisSize.min, children: [
-                const Text('Enter the 6-digit code.\nDemo mode: use 123456\n(connect Firebase Auth for real OTP)'),
-                TextField(controller: code, keyboardType: TextInputType.number, maxLength: 6),
-              ]),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-                TextButton(onPressed: () => Navigator.pop(context, code.text == '123456'), child: const Text('Verify')),
-              ],
-            ));
-    if (ok == true && mounted) setState(() => _v[flag] = true);
+    final entered = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Verify +91 $phone'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('Enter the verification code sent to your mobile number.'),
+          const SizedBox(height: 8),
+          TextField(
+            controller: code,
+            keyboardType: TextInputType.number,
+            maxLength: 6,
+            decoration: const InputDecoration(labelText: 'SMS verification code'),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, code.text.trim()), child: const Text('Verify')),
+        ],
+      ),
+    );
+    code.dispose();
+    if (entered == null || entered.isEmpty || !mounted) return;
+    final result = await Api.I.verifyPhoneOtp(phone, entered);
+    if (!mounted) return;
+    if (result.ok) {
+      setState(() {
+        _v['mobileV'] = true;
+        _v['verifiedMobile'] = phone;
+      });
+      _snack('Phone number verified successfully');
+    } else {
+      _snack(result.data['error']?.toString() ?? 'OTP verification failed. Please try again.');
+    }
   }
 
   Future<void> _gps() async {
@@ -164,6 +192,11 @@ class _CompleteVerificationScreenState extends State<CompleteVerificationScreen>
     }
     final mob = (patch['mobile'] ?? '').toString();
     if (mob.isNotEmpty && mob.length != 10) return _snack('Mobile number must be 10 digits');
+    final normalizedMobile = mob.replaceAll(RegExp(r'\D'), '');
+    if (normalizedMobile.isNotEmpty &&
+        (_v['mobileV'] != true || _v['verifiedMobile'] != normalizedMobile)) {
+      return _snack('Verify the current mobile number with SMS OTP before saving');
+    }
     setState(() => _saving = true);
     await AppState.I.updateProfile(patch);
     if (!mounted) return;
@@ -201,15 +234,14 @@ class _CompleteVerificationScreenState extends State<CompleteVerificationScreen>
         return _photoBox('photo', h: 150);
       case 'mobile':
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _field('mobile', 'Mobile Number', type: TextInputType.phone, max: 10, hint: '98765 43210', onChanged: (_) => setState(() => _v['mobileV'] = false)),
+          _field('mobile', 'Mobile Number', type: TextInputType.phone, max: 10, hint: '98765 43210', onChanged: (_) => setState(() { _v['mobileV'] = false; _v.remove('verifiedMobile'); })),
           _status(_v['mobileV'] == true, _v['mobileV'] == true ? 'Mobile number verified' : 'Not verified yet'),
           if (_v['mobileV'] != true) _smallBtn('Send OTP', Icons.sms, () => _verify('mobileV', _t('mobile').text)),
         ]);
       case 'email':
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _field('email', 'Email Address', type: TextInputType.emailAddress, onChanged: (_) => setState(() => _v['emailV'] = false)),
-          _status(_v['emailV'] == true, _v['emailV'] == true ? 'Email verified' : 'Not verified yet'),
-          if (_v['emailV'] != true) _smallBtn('Verify Email', Icons.mark_email_read, () => _verify('emailV', _t('email').text)),
+          _field('email', 'Email Address', type: TextInputType.emailAddress, onChanged: (_) => setState(() {})),
+          _status(_t('email').text.trim().isNotEmpty, _t('email').text.trim().isNotEmpty ? 'Email provided' : 'Optional / not provided'),
         ]);
       case 'address':
         return Column(children: [
@@ -285,9 +317,9 @@ class _CompleteVerificationScreenState extends State<CompleteVerificationScreen>
       case 'photo':
         return has('photo');
       case 'mobile':
-        return _v['mobileV'] == true;
+        return _v['mobileV'] == true && _v['verifiedMobile'] == _t('mobile').text.replaceAll(RegExp(r'\D'), '');
       case 'email':
-        return _v['emailV'] == true;
+        return has('email');
       case 'address':
         return has('phouse');
       case 'gps':

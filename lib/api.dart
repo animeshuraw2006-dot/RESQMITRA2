@@ -46,6 +46,13 @@ class Api {
     }
   }
 
+  // ── phone OTP (Renflair; provider API key stays on the backend) ──
+  Future<ApiRes> sendPhoneOtp(String phone) =>
+      _call('POST', '/auth/otp/send', body: {'phone': phone}, seconds: 30);
+
+  Future<ApiRes> verifyPhoneOtp(String phone, String otp) =>
+      _call('POST', '/auth/otp/verify', body: {'phone': phone, 'otp': otp}, seconds: 20);
+
   // ── account / profile ──
   Future<ApiRes> register(String role, Map<String, dynamic> profile, List<Map<String, dynamic>> contacts) =>
       _call('POST', '/auth/register', body: {'role': role, 'profile': _strip(profile), 'contacts': contacts}, seconds: 60);

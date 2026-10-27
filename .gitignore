@@ -14,3 +14,12 @@ pubspec.lock
 *.iml
 .idea/
 .DS_Store
+
+# Local secrets and generated Flutter state
+backend/.env
+.env
+.dart_tool/
+build/
+
+# Machine-specific Android SDK path
+android/local.properties
