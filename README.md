@@ -324,3 +324,7 @@ The application source code is distributed under the **Apache License 2.0**; see
 ### Build fix (October 2026)
 
 The registration screen's phone OTP button now passes the explicit `mobile` verification key. This avoids a Dart null-safety compile error caused by passing nullable `String? verifyKey` into `_verify(String, String)` from a callback. The OTP action remains available only beside the user's own mobile number; emergency contacts do not receive OTP buttons.
+
+### Phone OTP verification UI fix
+
+The registration and complete-verification OTP dialogs now keep the code entry open when the server rejects an OTP, show the backend error in the dialog, and only mark the phone as verified when the API responds with both a successful HTTP status and `verified: true`. The registration phone field clears its verified state if the number is edited, and the review status updates from Pending to Completed after successful verification.

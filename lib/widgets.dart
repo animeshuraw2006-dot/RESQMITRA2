@@ -66,6 +66,7 @@ class AppField extends StatelessWidget {
   final int? maxLength;
   final Widget? suffix, prefix;
   final VoidCallback? onTap;
+  final ValueChanged<String>? onChanged;
   final String? Function(String?)? validator;
   const AppField(
       {super.key,
@@ -80,6 +81,7 @@ class AppField extends StatelessWidget {
       this.suffix,
       this.prefix,
       this.onTap,
+      this.onChanged,
       this.validator});
   @override
   Widget build(BuildContext context) => Padding(
@@ -90,6 +92,7 @@ class AppField extends StatelessWidget {
             controller: ctrl,
             readOnly: readOnly,
             onTap: onTap,
+            onChanged: onChanged,
             keyboardType: type,
             maxLines: maxLines,
             maxLength: maxLength,

@@ -130,47 +130,79 @@ class _CompleteVerificationScreenState extends State<CompleteVerificationScreen>
   Future<void> _verify(String flag, String target) async {
     if (flag != 'mobileV') return;
     final phone = target.replaceAll(RegExp(r'\D'), '');
-    if (phone.length != 10) return _snack('Enter a valid 10-digit Indian mobile number');
+    if (phone.length != 10) {
+      _snack('Enter a valid 10-digit Indian mobile number');
+      return;
+    }
+    if (_v['verifiedMobile'] != phone && mounted) {
+      setState(() {
+        _v['mobileV'] = false;
+        _v.remove('verifiedMobile');
+      });
+    }
     final sent = await Api.I.sendPhoneOtp(phone);
     if (!mounted) return;
     if (!sent.ok) {
-      return _snack(sent.data['error']?.toString() ??
+      _snack(sent.data['error']?.toString() ??
           'Could not send OTP. Check the backend and Renflair configuration.');
+      return;
     }
     final code = TextEditingController();
-    final entered = await showDialog<String>(
+    var verifying = false;
+    String? errorText;
+    final verified = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('Verify +91 $phone'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Enter the verification code sent to your mobile number.'),
-          const SizedBox(height: 8),
-          TextField(
-            controller: code,
-            keyboardType: TextInputType.number,
-            maxLength: 6,
-            decoration: const InputDecoration(labelText: 'SMS verification code'),
-          ),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(dialogContext, code.text.trim()), child: const Text('Verify')),
-        ],
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, refreshDialog) => AlertDialog(
+          title: Text('Verify +91 $phone'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('Enter the 6-digit verification code sent by SMS.'),
+            const SizedBox(height: 8),
+            TextField(controller: code, keyboardType: TextInputType.number,
+              maxLength: 6, autofocus: true,
+              decoration: const InputDecoration(labelText: 'SMS verification code')),
+            if (errorText != null) ...[
+              const SizedBox(height: 4),
+              Text(errorText!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+            ],
+          ]),
+          actions: [
+            TextButton(onPressed: verifying ? null : () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: verifying ? null : () async {
+              final otp = code.text.trim();
+              if (!RegExp(r'^\d{6}$').hasMatch(otp)) {
+                refreshDialog(() => errorText = 'Enter the complete 6-digit OTP.');
+                return;
+              }
+              refreshDialog(() { verifying = true; errorText = null; });
+              final result = await Api.I.verifyPhoneOtp(phone, otp);
+              if (!dialogContext.mounted) return;
+              if (result.ok && result.data['verified'] == true) {
+                Navigator.pop(dialogContext, true);
+              } else {
+                refreshDialog(() {
+                  verifying = false;
+                  errorText = result.data['error']?.toString() ??
+                    (result.status == 0 ? 'Could not reach the server. Check internet and API_BASE.'
+                      : 'OTP verification failed. Check the code and try again.');
+                });
+              }
+            }, child: verifying
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Verify OTP')),
+          ],
+        ),
       ),
     );
     code.dispose();
-    if (entered == null || entered.isEmpty || !mounted) return;
-    final result = await Api.I.verifyPhoneOtp(phone, entered);
-    if (!mounted) return;
-    if (result.ok) {
-      setState(() {
-        _v['mobileV'] = true;
-        _v['verifiedMobile'] = phone;
-      });
-      _snack('Phone number verified successfully');
-    } else {
-      _snack(result.data['error']?.toString() ?? 'OTP verification failed. Please try again.');
-    }
+    if (verified != true || !mounted) return;
+    setState(() {
+      _v['mobileV'] = true;
+      _v['verifiedMobile'] = phone;
+    });
+    _snack('Phone number verified successfully');
   }
 
   Future<void> _gps() async {
