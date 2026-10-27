@@ -215,7 +215,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                         style: ElevatedButton.styleFrom(
                             backgroundColor: C.royal, foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                        onPressed: () => _verify(verifyKey, _t(k).text),
+                        onPressed: () => _verify('mobile', _t(k).text),
                         child: const Text('Send OTP')))),
           ],
         ]),

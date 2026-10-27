@@ -320,3 +320,7 @@ The application source code is distributed under the **Apache License 2.0**; see
   <strong>NO LIFE LEFT BEHIND</strong><br>
   HELP · SUPPORT · TOGETHER ❤️
 </p>
+
+### Build fix (October 2026)
+
+The registration screen's phone OTP button now passes the explicit `mobile` verification key. This avoids a Dart null-safety compile error caused by passing nullable `String? verifyKey` into `_verify(String, String)` from a callback. The OTP action remains available only beside the user's own mobile number; emergency contacts do not receive OTP buttons.
