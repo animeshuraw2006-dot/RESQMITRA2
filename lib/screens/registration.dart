@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services.dart';
 import '../api.dart';
+import '../otp_flow.dart';
 import '../state.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -128,89 +129,13 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   Future<void> _verify(String key, String target) async {
     if (key != 'mobile') return;
     final phone = target.replaceAll(RegExp(r'\D'), '');
-    if (phone.length != 10) {
-      _snack('Enter a valid 10-digit Indian mobile number');
+    if (_v['mobileV'] == true && _v['verifiedMobile'] == phone) {
+      _snack('This number is already verified');
       return;
     }
-
-    // A phone number change always requires a fresh verification.
-    if (_v['verifiedMobile'] != phone && mounted) {
-      setState(() {
-        _v['mobileV'] = false;
-        _v.remove('verifiedMobile');
-      });
-    }
-
-    final sent = await Api.I.sendPhoneOtp(phone);
-    if (!mounted) return;
-    if (!sent.ok) {
-      _snack(sent.data['error']?.toString() ??
-          'Could not send OTP. Check the backend and Renflair configuration.');
-      return;
-    }
-
-    final code = TextEditingController();
-    var verifying = false;
-    String? errorText;
-    final verified = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, refreshDialog) => AlertDialog(
-          title: Text('Verify +91 $phone'),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Text('Enter the 6-digit verification code sent by SMS.'),
-            const SizedBox(height: 8),
-            TextField(
-              controller: code,
-              keyboardType: TextInputType.number,
-              maxLength: 6,
-              autofocus: true,
-              decoration: const InputDecoration(labelText: 'SMS verification code'),
-            ),
-            if (errorText != null) ...[
-              const SizedBox(height: 4),
-              Text(errorText!, style: const TextStyle(color: Colors.red, fontSize: 12)),
-            ],
-          ]),
-          actions: [
-            TextButton(
-              onPressed: verifying ? null : () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: verifying ? null : () async {
-                final otp = code.text.trim();
-                if (!RegExp(r'^\d{6}$').hasMatch(otp)) {
-                  refreshDialog(() => errorText = 'Enter the complete 6-digit OTP.');
-                  return;
-                }
-                refreshDialog(() { verifying = true; errorText = null; });
-                final result = await Api.I.verifyPhoneOtp(phone, otp);
-                if (!dialogContext.mounted) return;
-                if (result.ok && result.data['verified'] == true) {
-                  Navigator.pop(dialogContext, true);
-                } else {
-                  refreshDialog(() {
-                    verifying = false;
-                    errorText = result.data['error']?.toString() ??
-                        (result.status == 0
-                            ? 'Could not reach the server. Check your internet and API_BASE.'
-                            : 'OTP verification failed. Check the code and try again.');
-                  });
-                }
-              },
-              child: verifying
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('Verify OTP'),
-            ),
-          ],
-        ),
-      ),
-    );
-    code.dispose();
-    if (verified != true || !mounted) return;
-
+    // One tap: dialog opens, SMS is sent, and the code auto-verifies when fully entered.
+    final verified = await verifyPhoneWithOtp(context, phone);
+    if (!verified || !mounted) return;
     setState(() {
       _v['mobileV'] = true;
       _v['verifiedMobile'] = phone;
@@ -266,8 +191,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                         style: ElevatedButton.styleFrom(
                             backgroundColor: C.royal, foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                        onPressed: () => _verify('mobile', _t(k).text),
-                        child: const Text('Send OTP')))),
+                        onPressed: _v['mobileV'] == true ? null : () => _verify('mobile', _t(k).text),
+                        child: Text(_v['mobileV'] == true ? 'Verified' : 'Verify')))),
           ],
         ]),
       );

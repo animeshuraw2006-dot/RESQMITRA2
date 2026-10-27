@@ -328,3 +328,11 @@ The registration screen's phone OTP button now passes the explicit `mobile` veri
 ### Phone OTP verification UI fix
 
 The registration and complete-verification OTP dialogs now keep the code entry open when the server rejects an OTP, show the backend error in the dialog, and only mark the phone as verified when the API responds with both a successful HTTP status and `verified: true`. The registration phone field clears its verified state if the number is edited, and the review status updates from Pending to Completed after successful verification.
+
+## OTP verification fix (latest)
+
+- **Root cause:** `POST /auth/otp/verify` validated the code with `/^\\d{6}$/` (an over-escaped regex that only matches a literal backslash), so every real 6-digit OTP was rejected before it was compared. Fixed to `/^\d{6}$/`.
+- **One-click verification:** a single **Verify** button now opens the dialog, sends the SMS automatically and verifies automatically on the 6th digit (typed, pasted or auto-filled). Includes a 60 s resend timer, remaining-attempt messages and Enter-to-submit. Shared by registration and profile screens (`lib/otp_flow.dart`).
+- **Renflair responses:** the backend now also detects failures Renflair reports with HTTP 200 (`"return": false`, invalid API, low balance).
+- **Safer attempt counting:** attempts are incremented atomically before comparison.
+- **Profile screen:** an already-verified number is no longer forced to re-verify unless changed; the dead "Send OTP" buttons on emergency contacts were removed.

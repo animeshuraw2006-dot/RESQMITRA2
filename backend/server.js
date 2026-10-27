@@ -68,7 +68,7 @@ app.use(express.json({ limit: '1mb' }));
 app.use(rateLimit({ windowMs: 60_000, limit: 240, standardHeaders: true, legacyHeaders: false }));
 const registerLimit = rateLimit({ windowMs: 60 * 60_000, limit: 20 });
 const otpSendLimit = rateLimit({ windowMs: 15 * 60_000, limit: 5, message: { error: 'Too many OTP requests. Please wait and try again.' } });
-const otpVerifyLimit = rateLimit({ windowMs: 15 * 60_000, limit: 15, message: { error: 'Too many verification attempts. Please wait and try again.' } });
+const otpVerifyLimit = rateLimit({ windowMs: 15 * 60_000, limit: 30, message: { error: 'Too many verification attempts. Please wait and try again.' } });
 const uploadLimit = rateLimit({ windowMs: 60_000, limit: 20 });
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -171,7 +171,9 @@ app.post('/auth/otp/send', otpSendLimit, wrap(async (req, res) => {
 
   const prior = await q('SELECT last_sent_at FROM phone_otp_challenges WHERE phone=$1', [phone]);
   if (prior.rowCount && Date.now() - new Date(prior.rows[0].last_sent_at).getTime() < 60_000) {
-    return bad(res, 'Please wait 60 seconds before requesting another OTP', 429);
+    const wait = Math.max(1, 60 - Math.floor((Date.now() - new Date(prior.rows[0].last_sent_at).getTime()) / 1000));
+    // `retry_after` lets the app open the code box (the earlier SMS is still valid) and run a resend timer.
+    return res.status(429).json({ error: `Please wait ${wait}s before requesting another OTP`, retry_after: wait });
   }
 
   const otp = String(crypto.randomInt(100000, 1000000));
@@ -192,18 +194,19 @@ app.post('/auth/otp/send', otpSendLimit, wrap(async (req, res) => {
     const providerBody = await providerResponse.text();
     let providerJson = null;
     try { providerJson = JSON.parse(providerBody); } catch {}
-    const providerText = typeof providerJson === 'object' && providerJson
-      ? JSON.stringify(providerJson).toLowerCase() : providerBody.toLowerCase();
+    // Renflair answers HTTP 200 even for failures and reports them in the body,
+    // e.g. {"return":false,"message":["Invalid API"]} / {"return":true,"request_id":"..","message":[..sent..]}
+    const isFalse = (v) => v === false || ['false', '0', 'error', 'failed', 'fail'].includes(String(v ?? '').toLowerCase());
+    const providerText = (providerJson ? JSON.stringify(providerJson) : providerBody).toLowerCase();
     const providerFailed = !providerResponse.ok ||
-      (providerJson && (providerJson.success === false ||
-        ['error', 'failed'].includes(String(providerJson.status ?? '').toLowerCase()))) ||
-      /invalid api|insufficient balance/i.test(providerText);
+      (providerJson && (isFalse(providerJson.return) || isFalse(providerJson.success) || isFalse(providerJson.status))) ||
+      /invalid api|invalid key|insufficient|low balance|not enough balance|invalid (phone|number)|blocked|unauthori[sz]ed/.test(providerText);
     if (providerFailed) {
       await q('DELETE FROM phone_otp_challenges WHERE phone=$1', [phone]);
-      console.error('Renflair OTP request failed with HTTP', providerResponse.status);
+      console.error('Renflair OTP request failed: HTTP', providerResponse.status, '-', providerBody.slice(0, 200).replace(/\d{6}/g, '******'));
       return bad(res, 'SMS provider could not send the OTP. Check the Renflair account and API configuration.', 502);
     }
-    res.json({ ok: true, message: 'OTP request submitted. Check your SMS messages.' });
+    res.json({ ok: true, message: 'OTP sent. Check your SMS messages.', expires_in: 300, resend_in: 60 });
   } catch (e) {
     await q('DELETE FROM phone_otp_challenges WHERE phone=$1', [phone]).catch(() => {});
     console.error('Renflair OTP request failed:', e?.name || 'provider error');
@@ -214,23 +217,32 @@ app.post('/auth/otp/send', otpSendLimit, wrap(async (req, res) => {
 app.post('/auth/otp/verify', otpVerifyLimit, wrap(async (req, res) => {
   const phone = normalizeIndianPhone(req.body?.phone);
   const otp = String(req.body?.otp ?? '').trim();
-  if (!phone || !/^\\d{6}$/.test(otp)) return bad(res, 'Enter the 6-digit OTP sent to your phone');
-  const r = await q('SELECT otp_hash, expires_at, attempts FROM phone_otp_challenges WHERE phone=$1', [phone]);
+  if (!phone || !/^\d{6}$/.test(otp)) return bad(res, 'Enter the 6-digit OTP sent to your phone');
+  // Count the attempt atomically BEFORE comparing, so parallel guesses cannot exceed the limit.
+  const r = await q(
+    `UPDATE phone_otp_challenges SET attempts = attempts + 1
+       WHERE phone=$1 RETURNING otp_hash, expires_at, attempts`,
+    [phone],
+  );
   if (!r.rowCount) return bad(res, 'OTP expired or not requested. Request a new OTP.', 400);
   const challenge = r.rows[0];
   if (new Date(challenge.expires_at).getTime() < Date.now()) {
     await q('DELETE FROM phone_otp_challenges WHERE phone=$1', [phone]);
     return bad(res, 'OTP expired. Request a new one.', 400);
   }
-  if (challenge.attempts >= 5) {
+  if (challenge.attempts > 5) {
     await q('DELETE FROM phone_otp_challenges WHERE phone=$1', [phone]);
     return bad(res, 'Too many incorrect attempts. Request a new OTP.', 429);
   }
   const expected = Buffer.from(challenge.otp_hash, 'hex');
   const actual = Buffer.from(otpDigest(phone, otp), 'hex');
   if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) {
-    await q('UPDATE phone_otp_challenges SET attempts=attempts+1 WHERE phone=$1', [phone]);
-    return bad(res, 'Incorrect OTP. Please check the code and try again.', 400);
+    const left = 5 - challenge.attempts;
+    if (left <= 0) {
+      await q('DELETE FROM phone_otp_challenges WHERE phone=$1', [phone]);
+      return bad(res, 'Too many incorrect attempts. Request a new OTP.', 429);
+    }
+    return bad(res, `Incorrect OTP. ${left} attempt${left === 1 ? '' : 's'} left.`, 400);
   }
   await q(
     `INSERT INTO verified_phones (phone, verified_at, expires_at)
